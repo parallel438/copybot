@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>フォローBot</title>
-<meta name="theme-color" content="#0f1a17">
+<meta name="theme-color" content="#eef3f0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1a17" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="フォローBot">
 <link rel="manifest" href="manifest.webmanifest">
@@ -14,17 +15,19 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
-/* 1カラムの操作盤：上に残高、その下に現在のフォロー先、タブで履歴と設定 */
+/* 操作盤：上に数字のタイル、中央に残高推移とコピーログ、下にフォロー中のウォレット */
 :root{
-  --bg:#f3f5f2; --surface:#ffffff; --line:#d9e0db; --fg:#18211d; --muted:#5d6b64;
-  --accent:#0f7a5c; --accent-fg:#ffffff; --win:#11804f; --loss:#c23b2e; --warn:#a86a00;
+  --bg:#eef3f0; --surface:#ffffff; --line:#dbe3de; --fg:#16201b; --muted:#66756d; --faint:#9aa8a0;
+  --accent:#12805d; --accent-soft:#d8f0e5; --accent-fg:#ffffff; --win:#11804f; --loss:#c23b2e; --warn:#b86e00;
+  --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4; --c6:#008300; --c7:#6250d6; --c8:#e34948;
   --font-body:"Zen Kaku Gothic New",system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
   --font-num:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root{
-  --bg:#0f1a17; --surface:#16231f; --line:#27382f; --fg:#e4ece7; --muted:#93a59b;
-  --accent:#3fc896; --accent-fg:#06140f; --win:#4fd69a; --loss:#ff7a6b; --warn:#f0b54a;
+  --bg:#0f1a17; --surface:#16231f; --line:#27382f; --fg:#e4ece7; --muted:#93a59b; --faint:#5f7268;
+  --accent:#3fc896; --accent-soft:#1d3a2f; --accent-fg:#06140f; --win:#4fd69a; --loss:#ff7a6b; --warn:#f0b54a;
+  --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#008300; --c7:#9085e9; --c8:#e66767;
   color-scheme:dark;
 }}
 *{box-sizing:border-box}
@@ -33,32 +36,64 @@ html,body{margin:0}
 body{
   background:var(--bg); color:var(--fg); font-family:var(--font-body); font-size:15px; line-height:1.55;
   padding-top:env(safe-area-inset-top,0px); padding-bottom:calc(24px + env(safe-area-inset-bottom,0px));
-  padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-left:max(12px,env(safe-area-inset-left,0px)); padding-right:max(12px,env(safe-area-inset-right,0px));
   -webkit-text-size-adjust:100%;
 }
-main{max-width:560px; margin:0 auto; display:flex; flex-direction:column; gap:16px; padding-block:16px}
+main{max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:12px; padding-block:14px}
 .num{font-family:var(--font-num); font-variant-numeric:tabular-nums}
-header{display:flex; align-items:center; justify-content:space-between; gap:12px}
-h1{font-size:18px; margin:0; letter-spacing:.02em}
-.pill{font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); color:var(--muted); white-space:nowrap}
-.pill.run{border-color:var(--accent); color:var(--accent)}
-.pill.demo{border-color:var(--warn); color:var(--warn)}
-.equity{display:flex; flex-direction:column; gap:2px}
-.equity .label{font-size:12px; color:var(--muted); letter-spacing:.06em}
-.equity .big{font-size:40px; font-weight:600; line-height:1.1}
-.equity .sub{font-size:14px}
-.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
-.stat{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:8px 10px; min-width:0}
-.stat .k{font-size:11px; color:var(--muted)}
-.stat .v{font-size:16px; font-weight:600}
-.trader{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:8px}
-.trader .row{display:flex; justify-content:space-between; align-items:baseline; gap:8px}
-.trader .name{font-size:18px; font-weight:700; overflow-wrap:anywhere; min-width:0}
-.trader .rank{font-size:13px; color:var(--muted)}
-.streak{display:flex; gap:6px; align-items:center; font-size:12px; color:var(--muted)}
-.dot{width:12px; height:12px; border-radius:50%; border:2px solid var(--line)}
-.dot.on{background:var(--loss); border-color:var(--loss)}
-.addr{font-size:11px; color:var(--muted); overflow-wrap:anywhere}
+.cap{font-family:var(--font-num); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 14px; min-width:0}
+header{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap}
+.brand{display:flex; align-items:center; gap:10px; min-width:0}
+.brand img{width:40px; height:40px; border-radius:10px}
+h1{font-size:22px; margin:0; line-height:1.1; letter-spacing:.01em}
+.meta{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.pill{font-family:var(--font-num); font-size:11px; letter-spacing:.08em; padding:4px 10px; border-radius:999px; border:1px solid var(--line); color:var(--muted); background:var(--surface); white-space:nowrap; display:inline-flex; align-items:center; gap:6px}
+.pill .led{width:7px; height:7px; border-radius:50%; background:var(--faint)}
+.pill.live{color:var(--accent); border-color:var(--accent)} .pill.live .led{background:var(--accent)}
+.pill.demo{color:var(--warn); border-color:var(--warn)} .pill.demo .led{background:var(--warn)}
+@media (prefers-reduced-motion:no-preference){.pill.live .led,.pill.demo .led{animation:pulse 1.6s ease-in-out infinite}}
+@keyframes pulse{50%{opacity:.3}}
+.tiles{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.tile .big{font-size:24px; font-weight:600; line-height:1.25}
+.tile .sub{font-size:11px; color:var(--muted)}
+.tile.pnl{border-left:3px solid var(--line)}
+.tile.split{display:flex; align-items:center; justify-content:space-between; gap:8px}
+.tile svg{flex:none}
+@media (max-width:480px){ #gauge{display:none} }
+.wl{font-family:var(--font-num); font-size:11px; line-height:1.4}
+.duo{display:grid; grid-template-columns:1fr; gap:10px}
+@media (min-width:760px){ .duo{grid-template-columns:1.15fr 1fr} .tiles{grid-template-columns:repeat(4,1fr)} }
+.chart-head{display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px}
+#chart{position:relative; height:210px}
+#chart svg{display:block; width:100%; height:100%}
+#chart .axis{font-family:var(--font-num); font-size:10px; fill:var(--muted)}
+#tip{position:absolute; pointer-events:none; background:var(--fg); color:var(--bg); font-family:var(--font-num); font-size:11px; padding:4px 8px; border-radius:6px; white-space:nowrap; transform:translate(-50%,-120%)}
+.log{font-family:var(--font-num); font-size:11.5px; line-height:1.75; max-height:250px; overflow-y:auto; display:flex; flex-direction:column}
+.log .ln{display:grid; grid-template-columns:4.6em 1fr; gap:8px; min-width:0}
+.log .ln span:last-child{min-width:0; overflow-wrap:anywhere}
+.k-TRACK{color:var(--c1)} .k-COPY{color:var(--c7)} .k-EXIT{color:var(--warn)} .k-FILL{color:var(--accent)}
+.k-HIRE{color:var(--win)} .k-FIRE{color:var(--loss)} .k-SYNC,.k-SKIP,.k-INFO{color:var(--muted)} .k-ERR{color:var(--loss)}
+.target{display:flex; align-items:center; gap:10px}
+.target .bar{flex:1; height:6px; border-radius:3px; background:var(--line); overflow:hidden}
+.target .bar i{display:block; height:100%; background:var(--accent); border-radius:3px}
+.wallets{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px}
+.w{display:flex; flex-direction:column; gap:3px; position:relative; padding:10px 11px 9px}
+.w.copying{border-color:var(--c7); box-shadow:0 0 0 1px var(--c7) inset}
+.w .top{display:flex; justify-content:space-between; align-items:center; gap:6px}
+.av{width:24px; height:24px; border-radius:50%; display:grid; place-items:center; color:#fff; font-size:12px; font-weight:700; flex:none}
+.w .rk{font-family:var(--font-num); font-size:10px; color:var(--muted); background:var(--bg); border-radius:4px; padding:0 5px}
+.w .badge{font-family:var(--font-num); font-size:9px; letter-spacing:.08em; color:#fff; background:var(--c7); border-radius:3px; padding:0 5px}
+.w .nm{font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.w .st{font-family:var(--font-num); font-size:10px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.w .cp{font-family:var(--font-num); font-size:11px; display:flex; justify-content:space-between; gap:6px; align-items:center}
+.w .cp b{font-size:13px}
+.w .dots{display:flex; gap:3px}
+.w .dots i{width:7px; height:7px; border-radius:50%; border:1.5px solid var(--line)}
+.w .dots i.on{background:var(--loss); border-color:var(--loss)}
+.w .meter{height:3px; border-radius:2px; background:var(--line); overflow:hidden; margin-top:3px}
+.w .meter i{display:block; height:100%; border-radius:2px}
+.w.empty{color:var(--muted); font-size:12px; justify-content:center; align-items:center; min-height:96px; border-style:dashed; background:transparent}
 .controls{display:flex; gap:8px}
 button{font:inherit; border-radius:10px; border:1px solid var(--line); background:var(--surface); color:var(--fg); padding:12px 14px; cursor:pointer}
 button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
@@ -67,6 +102,7 @@ button.danger{color:var(--loss)}
 button.ghost{background:transparent}
 .status{font-size:12px; color:var(--muted); min-height:1.5em; overflow-wrap:anywhere}
 .status.err{color:var(--loss)}
+.confirm{display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px}
 nav{display:flex; border-bottom:1px solid var(--line); gap:4px; overflow-x:auto}
 nav button{border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; padding:10px 12px; color:var(--muted); white-space:nowrap}
 nav button[aria-selected="true"]{color:var(--fg); border-bottom-color:var(--accent); font-weight:700}
@@ -77,54 +113,85 @@ nav button[aria-selected="true"]{color:var(--fg); border-bottom-color:var(--acce
 .item .r{text-align:right; white-space:nowrap}
 .item .tag{font-size:11px; padding:1px 6px; border-radius:4px; border:1px solid currentColor; margin-right:6px}
 .win{color:var(--win)} .loss{color:var(--loss)} .muted{color:var(--muted)}
-.empty{color:var(--muted); font-size:14px; padding:20px 0}
-form{display:flex; flex-direction:column; gap:14px}
+.empty-msg{color:var(--muted); font-size:14px; padding:20px 0}
+form{display:flex; flex-direction:column; gap:14px; padding-top:12px}
 label{display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted)}
 label .hint{font-size:12px}
 input,textarea,select{font:inherit; font-size:16px; color:var(--fg); background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px; width:100%; min-width:0}
 textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
 .grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
-.note{font-size:13px; color:var(--muted); background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px}
-.note b{color:var(--fg)}
 .preview{display:flex; flex-direction:column; gap:6px; font-size:13px}
 .preview .row{display:flex; justify-content:space-between; align-items:center; gap:8px}
 .preview .row button{padding:6px 12px}
 .preview ol{margin:0; padding-left:2.2em; max-height:240px; overflow-y:auto}
 .preview li{padding:2px 0; overflow-wrap:anywhere}
 .preview li .num{font-size:11px; color:var(--muted); margin-left:6px}
-.confirm{display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px}
-@media (prefers-reduced-motion:no-preference){.pill.run{animation:pulse 2s ease-in-out infinite}}
-@keyframes pulse{50%{opacity:.55}}
+.note{font-size:13px; color:var(--muted); margin-top:16px}
+.note b{color:var(--fg)}
 </style>
 </head>
 <body>
 <main>
   <header>
-    <h1>フォローBot</h1>
-    <span id="pill" class="pill">停止中</span>
+    <div class="brand">
+      <img src="icon.svg" alt="">
+      <div>
+        <h1>フォローBot</h1>
+        <div class="cap">copy trading · solana</div>
+      </div>
+    </div>
+    <div class="meta">
+      <span id="metaInfo" class="cap"></span>
+      <span id="pill" class="pill"><span class="led"></span><span id="pillText">停止中</span></span>
+    </div>
   </header>
 
-  <section class="equity" aria-label="残高">
-    <span class="label">仮想資金の評価額</span>
-    <span id="equity" class="big num">$0.00</span>
-    <span id="pnl" class="sub num">±$0.00</span>
-  </section>
-
-  <section class="stats">
-    <div class="stat"><div class="k">取引</div><div id="sTrades" class="v num">0</div></div>
-    <div class="stat"><div class="k">勝ち</div><div id="sWins" class="v num win">0</div></div>
-    <div class="stat"><div class="k">負け</div><div id="sLosses" class="v num loss">0</div></div>
-    <div class="stat"><div class="k">勝率</div><div id="sRate" class="v num">–</div></div>
-  </section>
-
-  <section class="trader" aria-label="現在のフォロー先">
-    <div class="row">
-      <span id="tName" class="name">未選択</span>
-      <span id="tRank" class="rank"></span>
+  <section class="tiles">
+    <div class="card tile">
+      <div class="cap">残高</div>
+      <div id="equity" class="big num">$0.00</div>
+      <div id="eqSub" class="sub num"></div>
     </div>
-    <div id="tAddr" class="addr num"></div>
-    <div class="streak"><span>連敗</span><span id="tDots"></span><span id="tInfo"></span></div>
+    <div id="pnlTile" class="card tile pnl">
+      <div class="cap">損益</div>
+      <div id="pnl" class="big num">$0.00</div>
+      <div id="pnlSub" class="sub num"></div>
+    </div>
+    <div class="card tile split">
+      <div>
+        <div class="cap">最大ドローダウン</div>
+        <div id="dd" class="big num" style="color:var(--warn)">0.0%</div>
+        <div id="ddSub" class="sub num"></div>
+      </div>
+      <svg id="gauge" width="72" height="44" viewBox="0 0 72 44" role="img" aria-label="ドローダウンのメーター"></svg>
+    </div>
+    <div class="card tile split">
+      <svg id="ring" width="56" height="56" viewBox="0 0 56 56" role="img" aria-label="勝率"></svg>
+      <div style="flex:1">
+        <div class="cap">勝率</div>
+        <div class="wl"><span id="wW" class="win">0勝</span><br><span id="wL" class="loss">0敗</span></div>
+      </div>
+    </div>
   </section>
+
+  <section class="duo">
+    <div class="card">
+      <div class="chart-head"><span class="cap">残高の推移</span><span id="chartRange" class="cap"></span></div>
+      <div id="chart"><div id="tip" hidden></div></div>
+    </div>
+    <div class="card">
+      <div class="chart-head"><span class="cap">コピーログ</span><span id="logCount" class="cap"></span></div>
+      <div id="log" class="log"></div>
+    </div>
+  </section>
+
+  <section class="target">
+    <span id="targetLabel" class="cap"></span>
+    <span class="bar"><i id="targetBar" style="width:0%"></i></span>
+    <span id="targetPct" class="cap" style="color:var(--accent)">0%</span>
+  </section>
+
+  <section id="wallets" class="wallets" aria-label="フォロー中のウォレット"></section>
 
   <div class="controls">
     <button id="btnRun" class="primary" type="button">開始</button>
@@ -138,14 +205,12 @@ textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
   <div id="status" class="status" role="status"></div>
 
   <nav role="tablist">
-    <button role="tab" data-tab="timeline" aria-selected="true">交代履歴</button>
-    <button role="tab" data-tab="trades" aria-selected="false">取引</button>
+    <button role="tab" data-tab="trades" aria-selected="true">取引</button>
     <button role="tab" data-tab="positions" aria-selected="false">保有中</button>
     <button role="tab" data-tab="settings" aria-selected="false">設定</button>
   </nav>
 
-  <section id="tab-timeline" class="list"></section>
-  <section id="tab-trades" class="list" hidden></section>
+  <section id="tab-trades" class="list"></section>
   <section id="tab-positions" class="list" hidden></section>
   <section id="tab-settings" hidden>
     <form id="settingsForm">
@@ -156,16 +221,18 @@ textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
         </select>
       </label>
       <div class="grid2">
-        <label>開始資金（$）<input id="startCash" type="number" step="0.01" min="1" inputmode="decimal"></label>
-        <label>追従倍率<input id="ratio" type="number" step="0.01" min="0.01" inputmode="decimal"></label>
+        <label>同時にフォローする人数<input id="slots" type="number" step="1" min="1" max="8" inputmode="numeric"></label>
         <label>交代する連敗数<input id="lossLimit" type="number" step="1" min="1" inputmode="numeric"></label>
-        <label>確認間隔（秒）<input id="pollSec" type="number" step="1" min="3" inputmode="numeric"></label>
+        <label>開始資金（$）<input id="startCash" type="number" step="0.01" min="1" inputmode="decimal"></label>
+        <label>目標残高（$）<input id="target" type="number" step="1" min="1" inputmode="decimal"></label>
+        <label>追従倍率<input id="ratio" type="number" step="0.01" min="0.01" inputmode="decimal"></label>
+        <label>確認間隔（秒）<input id="pollSec" type="number" step="1" min="5" inputmode="numeric"></label>
         <label>スリッページ（%）<input id="slip" type="number" step="0.1" min="0" inputmode="decimal"></label>
         <label>手数料（1回 $）<input id="fee" type="number" step="0.01" min="0" inputmode="decimal"></label>
       </div>
       <label>フォロー候補（上から順位順）
         <textarea id="traders" spellcheck="false" placeholder="ランキングのページをコピーして、ここにそのまま貼り付け"></textarea>
-        <span class="hint">Solana Tracker や Kolscan のランキングを、ページごとコピーして貼り付けるだけでOKです。ウォレットアドレスと名前を自動で拾い、上から順位順に並べます。プロフィールのURLを並べて貼っても読み取れます。</span>
+        <span class="hint">Solana Tracker や Kolscan のランキングを、ページごとコピーして貼り付けるだけでOKです。ウォレットアドレスと名前（あれば成績も）を自動で拾い、上から順位順に並べます。上位から「同時にフォローする人数」ぶん雇い、誰かが連敗で解雇されたら、次の順位の人が入ります。</span>
       </label>
       <div class="preview">
         <div class="row"><span id="previewCount" class="muted">まだ読み取っていません</span><button id="btnClear" class="ghost" type="button">クリア</button></div>
@@ -173,19 +240,18 @@ textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
       </div>
       <label>Solana RPC URL
         <input id="rpc" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="空欄でOK（無料の公開RPCを自動で切り替え）">
-        <span class="hint">空欄なら、登録不要の無料RPCを順番に試し、断られたら自動で次に切り替えます。それでも失敗が続くときは、Heliusの無料プラン（登録のみ・課金なし）で発行したURLを入れてください。</span>
+        <span class="hint">空欄なら、登録不要の無料RPCを順番に試し、断られたら自動で次に切り替えます。8人同時だと公開RPCは断られやすいので、Heliusの無料プラン（登録のみ・課金なし）で発行したURLを入れるのがおすすめです。</span>
       </label>
       <button class="primary" type="submit">設定を保存</button>
       <div id="savedMsg" class="status"></div>
     </form>
-    <div class="note" style="margin-top:16px">
+    <div class="note">
       <b>このアプリでできること</b><br>
-      ・候補リストの上位トレーダーの売買を監視し、追従倍率ぶんの金額で同じ銘柄を<b>仮想資金で</b>売買します。<br>
-      ・相手が売ったら同じ割合だけ決済します。決済が設定回数続けて損失なら、そのトレーダーを解雇して次の候補を雇います。<br>
-      ・解雇時に保有中の銘柄はその時点の価格で決済します。<br>
+      ・候補リストの上位を同時に何人もフォローし、その人が買ったら追従倍率ぶんの金額で同じ銘柄を<b>仮想資金で</b>買います。売ったら同じ割合だけ決済します。<br>
+      ・人ごとに連敗を数え、設定回数続けて損失なら解雇して、次の順位の人を雇います。解雇した人の保有分はその時点の価格で決済します。<br>
       ・実際のお金は動きません。ウォレットや秘密鍵は不要です。<br><br>
       <b>注意</b><br>
-      ・画面を閉じている間は動きません。開き直すと、止まっていた間の取引（最大25件）をまとめて反映します。<br>
+      ・画面を閉じている間は動きません。開き直すと、止まっていた間の取引（1人あたり最大25件）をまとめて反映します。<br>
       ・価格はトレーダー本人の約定価格にスリッページを足した概算です。実際の追従では遅れの分さらに不利になります。
     </div>
   </section>
@@ -195,30 +261,31 @@ textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
 "use strict";
 const SOL = "So11111111111111111111111111111111111111112";
 const USD_MINTS = new Set(["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v","Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"]);
-const KEY = "followbot.v1";
+const KEY = "followbot.v2";
+const MAX_SLOTS = 8;
 const DEMO_TRADERS = [
-  {name:"demo_kaito", addr:"demo-1", skill:.38},
-  {name:"demo_mio",   addr:"demo-2", skill:.45},
-  {name:"demo_ren",   addr:"demo-3", skill:.68},
-  {name:"demo_yui",   addr:"demo-4", skill:.55},
-  {name:"demo_sora",  addr:"demo-5", skill:.6},
-];
+  ["demo_kaito",.38],["demo_mio",.45],["demo_ren",.68],["demo_yui",.55],["demo_sora",.6],
+  ["demo_haru",.5],["demo_aoi",.62],["demo_riku",.42],["demo_mei",.58],["demo_taku",.47],
+].map(([name,skill],i)=>({name, addr:"demo-"+(i+1), skill, stat:"架空のトレーダー"}));
 
 const defaults = () => ({
-  settings:{mode:"demo", startCash:52, ratio:.25, lossLimit:2, pollSec:10, slip:1, fee:.02,
-    rpc:"", traders:""},
+  settings:{mode:"demo", slots:8, lossLimit:2, startCash:52, target:100, ratio:.25, pollSec:15, slip:1, fee:.02, rpc:"", traders:""},
   run:null,
 });
 function freshRun(s){
-  return {cash:+s.startCash, startCash:+s.startCash, cur:null, ended:false, fired:[], streak:0, lastSig:null,
-    positions:{}, trades:[], timeline:[], hiredTrades:0, demo:{}, startedAt:Date.now()};
+  return {cash:+s.startCash, startCash:+s.startCash, slots:[], fired:[], positions:{}, trades:[], log:[],
+    hist:[], peak:+s.startCash, maxDD:0, copies:0, demo:{}, lastSync:null};
 }
 
 let S;
-try{ S = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY)||"{}")); }catch(e){ S = defaults(); }
+try{
+  S = JSON.parse(localStorage.getItem(KEY)||"null");
+  if(!S){ const old = JSON.parse(localStorage.getItem("followbot.v1")||"null"); S = {settings: old?.settings || {}, run:null}; }
+}catch(e){ S = null; }
+S = Object.assign(defaults(), S||{});
 S.settings = Object.assign(defaults().settings, S.settings);
-if(S.settings.rpc === "https://api.mainnet-beta.solana.com") S.settings.rpc = "";   // 旧初期値は403になりやすいので自動切り替えに移行
-if(!S.run || !("cur" in S.run)) S.run = freshRun(S.settings);
+if(S.settings.rpc === "https://api.mainnet-beta.solana.com") S.settings.rpc = "";
+if(!S.run || !Array.isArray(S.run.slots)) S.run = freshRun(S.settings);
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
 
 let running = false, timer = null, busy = false, wakeLock = null;
@@ -226,23 +293,33 @@ let solUsd = null, solUsdAt = 0, marksAt = 0;
 const $ = id => document.getElementById(id);
 
 /* ---------- 候補リスト ---------- */
-// 貼り付けた文字からウォレットアドレスを出てきた順に拾い、近くの文字を名前にする
+// 貼り付けた文字からウォレットアドレスを出てきた順に拾い、近くの文字を名前と成績にする
 const ADDR_RE = /(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])/g;
+const hasAddr = s => new RegExp(ADDR_RE.source).test(s);
 const NOT_WALLET = new Set([SOL, ...USD_MINTS]);
+const MONEY_RE = /[+-]?\s?\$\s?[\d,.]+\s?[kKmMbB]?|[+-][\d,.]+\s?[kKmM]?\s?SOL/i;
 function cleanName(s){
   return s.replace(/https?:\/\/\S+/g," ").replace(ADDR_RE," ")
-    .replace(/^\s*(#|No\.?)?\s*\d+\s*[.)、:]?\s+/,"")       // 先頭の順位番号
-    .replace(/[-+]?\$?\s?[\d,.]+\s?[KMBkmb%]?(\s|$)/g," ")   // 金額・％・数字
+    .replace(/^\s*(#|No\.?)?\s*\d+\s*[.)、:]?\s+/,"")
+    .replace(/[-+]?\$?\s?[\d,.]+\s?[KMBkmb%]?(\s|$)/g," ")
     .replace(/[|│\t]+/g," ").replace(/\s+/g," ").trim();
 }
 function guessName(lines, i){
   const own = cleanName(lines[i]);
   if(own && own.length <= 30) return own;
   for(let j=i-1; j>=Math.max(0,i-3); j--){
-    if(new RegExp(ADDR_RE.source).test(lines[j])) break;     // 前の人の行まで戻らない
-    if(/[$%＄]|^\s*[+-]\d|\bsol\b/i.test(lines[j])) continue;   // 損益などの数字の行は名前にしない
+    if(hasAddr(lines[j])) break;
+    if(/[$%＄]|^\s*[+-]\d|\bsol\b/i.test(lines[j])) continue;
     const n = cleanName(lines[j]);
     if(n && n.length <= 30 && !/^(PnL|ROI|Win|勝率|利益|Rank|順位)/i.test(n)) return n;
+  }
+  return "";
+}
+function guessStat(lines, i){
+  for(let j=i; j<Math.min(lines.length,i+5); j++){
+    if(j>i && hasAddr(lines[j])) break;
+    const m = lines[j].replace(ADDR_RE," ").match(MONEY_RE);
+    if(m) return m[0].replace(/\s+/g,"");
   }
   return "";
 }
@@ -251,176 +328,121 @@ function parseCandidates(text){
   lines.forEach((line,i)=>{
     const found = line.match(ADDR_RE)||[];
     for(const a of found){
-      if(seen.has(a) || NOT_WALLET.has(a) || /(pump|bonk)$/.test(a)) continue;   // トークンのアドレスは除外
+      if(seen.has(a) || NOT_WALLET.has(a) || /(pump|bonk)$/.test(a)) continue;
       seen.add(a);
-      out.push({addr:a, name: (found.length===1 && guessName(lines,i)) || shortMint(a)});
+      const one = found.length===1;
+      out.push({addr:a, name:(one && guessName(lines,i)) || shortMint(a), stat: one ? guessStat(lines,i) : ""});
     }
   });
   return out;
 }
 function traderList(){ return S.settings.mode === "demo" ? DEMO_TRADERS : parseCandidates(S.settings.traders); }
-function current(){ return S.run.cur; }
 function rankOf(addr){ const i = traderList().findIndex(t=>t.addr===addr); return i<0 ? null : i+1; }
+const active = () => S.run.slots.filter(Boolean);
 
-/* ---------- 表示 ---------- */
-const fmt$ = v => (v<0?"-$":"$")+Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtSigned = v => (v>=0?"+":"-")+"$"+Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+/* ---------- 書式 ---------- */
+const money = (v,d=2) => Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmt$ = v => (v<0?"-$":"$")+money(v);
+const fmtSigned = v => (v>=0?"+$":"-$")+money(v);
+const fmtK = v => v>=1e6 ? "$"+(v/1e6).toFixed(1)+"M" : v>=1e3 ? "$"+(v/1e3).toFixed(1)+"k" : "$"+v.toFixed(2);
 const fmtPrice = v => v>=1 ? "$"+v.toFixed(4) : "$"+Number(v.toPrecision(3));
+const hhmm = t => new Date(t).toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"});
 const time = t => new Date(t).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});
 function el(tag, cls, text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
-function equity(){ let v=S.run.cash; for(const p of Object.values(S.run.positions)) v += p.qty*(p.last||p.avg); return v; }
 function shortMint(m){ return m.slice(0,4)+"…"+m.slice(-4); }
-
-function render(){
-  const r = S.run, eq = equity(), pnl = eq - r.startCash;
-  $("equity").textContent = fmt$(eq);
-  $("pnl").textContent = `${fmtSigned(pnl)}（${(pnl/r.startCash*100).toFixed(1)}%）開始 ${fmt$(r.startCash)}`;
-  $("pnl").className = "sub num " + (pnl>0?"win":pnl<0?"loss":"muted");
-  const sells = r.trades.filter(t=>t.side!=="buy");
-  const wins = sells.filter(t=>t.pnl>0).length, losses = sells.length-wins;
-  $("sTrades").textContent = sells.length; $("sWins").textContent = wins; $("sLosses").textContent = losses;
-  $("sRate").textContent = sells.length ? Math.round(wins/sells.length*100)+"%" : "–";
-
-  const pill = $("pill");
-  pill.textContent = running ? (S.settings.mode==="demo"?"デモ稼働中":"稼働中") : "停止中";
-  pill.className = "pill" + (running ? (S.settings.mode==="demo"?" demo":" run") : "");
-  $("btnRun").textContent = running ? "停止" : (r.cur ? "再開" : "開始");
-
-  const c = current();
-  $("tName").textContent = c ? c.name : "未選択";
-  const rank = c && rankOf(c.addr);
-  $("tRank").textContent = c ? (rank ? `ランキング #${rank}` : "リスト外") : "";
-  $("tAddr").textContent = c && S.settings.mode==="live" ? c.addr : "";
-  const dots = $("tDots"); dots.replaceChildren();
-  for(let i=0;i<S.settings.lossLimit;i++){ dots.append(el("span","dot"+(i<r.streak?" on":""))); }
-  dots.style.display="flex"; dots.style.gap="4px";
-  $("tInfo").textContent = c ? `この人で${r.hiredTrades}回決済` : "";
-
-  // 交代履歴
-  const tl = $("tab-timeline"); tl.replaceChildren();
-  if(!r.timeline.length) tl.append(el("div","empty","まだ履歴はありません。「開始」を押すと、候補リストの1位から雇います。"));
-  for(const e of [...r.timeline].reverse()){
-    const it = el("div","item");
-    it.append(el("span","t num",time(e.t)));
-    const d = el("span","d");
-    const tagCls = e.kind==="hire"?"win":e.kind==="fire"?"loss":"muted";
-    d.append(el("span","tag "+tagCls,{hire:"雇用",fire:"解雇",info:"情報",stop:"終了"}[e.kind]||"情報"), document.createTextNode(e.text));
-    it.append(d, el("span","r num muted",e.eq!=null?fmt$(e.eq):""));
-    tl.append(it);
-  }
-  // 取引
-  const tr = $("tab-trades"); tr.replaceChildren();
-  if(!r.trades.length) tr.append(el("div","empty","まだ取引はありません。"));
-  for(const t of [...r.trades].reverse()){
-    const it = el("div","item");
-    it.append(el("span","t num",time(t.t)));
-    const d = el("span","d");
-    const label = t.side==="buy"?"買い":t.side==="close"?"強制決済":"売り";
-    d.append(el("span","tag "+(t.side==="buy"?"muted":t.pnl>0?"win":"loss"),label),
-      document.createTextNode(`${t.sym}  ${fmt$(t.usd)} @ ${fmtPrice(t.price)}`));
-    d.append(el("div","t",t.trader));
-    it.append(d, el("span","r num "+(t.side==="buy"?"muted":t.pnl>0?"win":"loss"), t.side==="buy"?"":fmtSigned(t.pnl)));
-    tr.append(it);
-  }
-  // 保有
-  const ps = $("tab-positions"); ps.replaceChildren();
-  const pos = Object.values(r.positions);
-  if(!pos.length) ps.append(el("div","empty","保有中の銘柄はありません。"));
-  for(const p of pos){
-    const val = p.qty*(p.last||p.avg), u = val - p.cost;
-    const it = el("div","item");
-    it.append(el("span","t num",time(p.t)));
-    const d = el("span","d"); d.append(document.createTextNode(`${p.sym}  取得 ${fmt$(p.cost)}`), el("div","t",`平均 ${fmtPrice(p.avg)} / 現在 ${fmtPrice(p.last||p.avg)}`));
-    it.append(d, el("span","r num "+(u>=0?"win":"loss"), fmtSigned(u)));
-    ps.append(it);
-  }
-}
+function equity(){ let v=S.run.cash; for(const p of Object.values(S.run.positions)) v += p.qty*(p.last||p.avg); return v; }
 function status(msg, err){ const s=$("status"); s.textContent=msg||""; s.className="status"+(err?" err":""); }
-function log(kind, text){ S.run.timeline.push({t:Date.now(), kind, text, eq:equity()}); if(S.run.timeline.length>300) S.run.timeline.shift(); }
+function log(k, text){ S.run.log.push({t:Date.now(), k, text}); if(S.run.log.length>400) S.run.log.splice(0,100); }
+function pushTrade(t){ S.run.trades.push(t); if(S.run.trades.length>600) S.run.trades.splice(0,100); }
 
-/* ---------- 売買ロジック（デモ・実データ共通） ---------- */
-function onEvent(ev){
-  // ev: {type:"buy"|"sell", mint, sym, usd(買い時の相手の金額), price, frac(売り時の割合), t}
-  const r = S.run, s = S.settings, who = current().name;
+/* ---------- 雇用・解雇 ---------- */
+function newSlot(c){ return {addr:c.addr, name:c.name, stat:c.stat||"", skill:c.skill, streak:0, lastSig:null, pnl:0, wins:0, losses:0, hiredAt:Date.now()}; }
+// 空いている枠に、解雇していない候補のうち順位が上の人から入れる
+function fillSlots(){
+  const r = S.run, n = Math.min(MAX_SLOTS, Math.max(1, S.settings.slots)), list = traderList();
+  while(r.slots.length < n) r.slots.push(null);
+  while(r.slots.length > n){ const s = r.slots[r.slots.length-1]; if(s) removeSlot(r.slots.length-1, `${s.name} を外しました（人数を減らしたため）`); r.slots.pop(); }
+  for(let i=0;i<r.slots.length;i++){
+    if(r.slots[i]) continue;
+    const used = new Set(active().map(s=>s.addr));
+    const c = list.find(t => !r.fired.includes(t.addr) && !used.has(t.addr));
+    if(!c) continue;
+    r.slots[i] = newSlot(c);
+    log("HIRE", `${c.name}（#${rankOf(c.addr)}）を雇用`);
+  }
+}
+function closeAll(addr){ for(const p of Object.values(S.run.positions)) if(p.addr===addr) sellPart(p, 1, p.last||p.avg, "close"); }
+function removeSlot(i, msg){ const s = S.run.slots[i]; closeAll(s.addr); S.run.slots[i] = null; log("INFO", msg); }
+function fireSlot(i){
+  const s = S.run.slots[i];
+  closeAll(s.addr);
+  S.run.fired.push(s.addr);
+  S.run.slots[i] = null;
+  log("FIRE", `${s.name} を${s.streak}連敗で解雇`);
+  fillSlots();
+  if(!active().length){ log("INFO","候補がいなくなったので停止しました。設定でランキングを貼り直してください。"); stop(); }
+}
+
+/* ---------- 売買（デモ・実データ共通） ---------- */
+function handle(i, ev){
+  const r = S.run, s = r.slots[i], st = S.settings;
   if(ev.type === "buy"){
-    const want = ev.usd * s.ratio;
-    const usd = Math.min(want, r.cash - s.fee);
-    if(usd < 0.5){ return; }
-    const price = ev.price * (1 + s.slip/100);
-    const qty = usd / price;
-    const p = r.positions[ev.mint] || (r.positions[ev.mint] = {mint:ev.mint, sym:ev.sym, qty:0, cost:0, avg:0, t:ev.t, trader:who});
-    p.qty += qty; p.cost += usd; p.avg = p.cost/p.qty; p.last = ev.price; p.sym = ev.sym || p.sym;
-    r.cash -= usd + s.fee;
-    pushTrade({side:"buy", sym:p.sym, usd, price, pnl:0, trader:who, t:ev.t});
+    log("TRACK", `${s.name} が ${ev.sym} を ${fmtK(ev.usd)} 購入`);
+    const usd = Math.min(ev.usd*st.ratio, r.cash - st.fee);
+    if(usd < 0.5){ log("SKIP", `資金が足りないので ${ev.sym} はコピーせず`); return; }
+    const price = ev.price*(1+st.slip/100), qty = usd/price, key = s.addr+":"+ev.mint;
+    const p = r.positions[key] || (r.positions[key] = {key, addr:s.addr, who:s.name, mint:ev.mint, sym:ev.sym, qty:0, cost:0, avg:0, t:ev.t});
+    p.qty += qty; p.cost += usd; p.avg = p.cost/p.qty; p.last = ev.price;
+    r.cash -= usd + st.fee; r.copies++;
+    pushTrade({side:"buy", sym:p.sym, usd, price, pnl:0, who:s.name, t:ev.t});
+    log("COPY", `${s.name} をコピー → ${ev.sym} を ${fmt$(usd)} 買い`);
   }else{
-    const p = r.positions[ev.mint];
-    if(!p) return;                       // 追従前に買っていた銘柄の売りは無視
-    const frac = Math.min(1, Math.max(0, ev.frac));
-    sellPart(p, frac, ev.price, "sell", ev.t);
+    const p = r.positions[s.addr+":"+ev.mint];
+    if(!p) return;
+    log("EXIT", `${s.name} が ${p.sym} を売却 → 決済をコピー`);
+    sellPart(p, Math.min(1, Math.max(0, ev.frac)), ev.price, "sell", ev.t);
   }
 }
-function sellPart(p, frac, mktPrice, side, t){
-  const r = S.run, s = S.settings, who = current() ? current().name : p.trader;
-  const qty = p.qty*frac, cost = p.cost*frac;
-  const price = mktPrice * (1 - s.slip/100);
-  const proceeds = qty*price - s.fee;
-  const pnl = proceeds - cost;
-  r.cash += proceeds; p.qty -= qty; p.cost -= cost; p.last = mktPrice;
-  if(frac >= 0.999 || p.qty*mktPrice < 0.01) delete r.positions[p.mint];
-  pushTrade({side, sym:p.sym, usd:qty*price, price, pnl, trader:who, t:t||Date.now()});
+function sellPart(p, frac, mkt, side, t){
+  const r = S.run, st = S.settings;
+  const qty = p.qty*frac, cost = p.cost*frac, price = mkt*(1-st.slip/100);
+  const proceeds = qty*price - st.fee, pnl = proceeds - cost;
+  r.cash += proceeds; p.qty -= qty; p.cost -= cost; p.last = mkt;
+  if(frac >= 0.999 || p.qty*mkt < 0.01) delete r.positions[p.key];
+  pushTrade({side, sym:p.sym, usd:qty*price, price, pnl, who:p.who, t:t||Date.now()});
+  log("FILL", `${p.sym} ${side==="close"?"強制決済":"売り"} ${fmtSigned(pnl)}`);
+  const i = r.slots.findIndex(s => s && s.addr===p.addr), s = r.slots[i];
+  if(!s) return;
+  s.pnl += pnl; if(pnl > 0) s.wins++; else s.losses++;
   if(side === "close") return;
-  r.hiredTrades++;
-  r.streak = pnl < 0 ? r.streak+1 : 0;
-  if(r.streak >= s.lossLimit) fire();
-}
-function pushTrade(t){ S.run.trades.push(t); if(S.run.trades.length>500) S.run.trades.shift(); }
-
-function fire(){
-  const r = S.run, c = current();
-  for(const p of Object.values(r.positions)) sellPart(p, 1, p.last||p.avg, "close");
-  r.fired.push(c.addr);
-  const rank = rankOf(c.addr);
-  log("fire", `${c.name}${rank?`（#${rank}）`:""}を${r.streak}連敗で解雇`);
-  hireNext();
-}
-// 解雇していない候補のうち、いちばん順位が上の人を雇う（リストを貼り替えても新しい順位で選ぶ）
-function hireNext(){
-  const r = S.run, list = traderList();
-  const i = list.findIndex(t => !r.fired.includes(t.addr));
-  r.streak = 0; r.hiredTrades = 0; r.lastSig = null;
-  if(i < 0){
-    r.cur = null; r.ended = true;
-    log("stop", "候補がいなくなったので停止しました。設定でランキングを貼り直してください。");
-    stop(); return false;
-  }
-  r.cur = list[i]; r.ended = false;
-  log("hire", `${list[i].name}（#${i+1}）を雇用`);
-  return true;
+  s.streak = pnl < 0 ? s.streak+1 : 0;
+  if(s.streak >= st.lossLimit) fireSlot(i);
 }
 
 /* ---------- デモ用の架空トレーダー ---------- */
 let demoSeq = 0;
+const DEMO_SYMS = ["PEPU","WIFI","BONKO","MOODENG2","GIGA","CHILL","NUB","SLERF2","PNUT2","AI16Z2","FART2","PUNCH"];
 function demoTick(){
-  const c = current(); if(!c) return;
-  const st = S.run.demo[c.addr] || (S.run.demo[c.addr] = {hold:{}});
-  // 保有銘柄の価格をゆらす（評価額の表示用）
-  for(const [m,h] of Object.entries(st.hold)){ h.price *= Math.exp((Math.random()-.5)*.06); const p=S.run.positions[m]; if(p) p.last=h.price; }
-  if(Math.random() > .3) return;
-  const held = Object.keys(st.hold);
-  if(held.length < 2 && (held.length===0 || Math.random()<.45)){
-    const mint = "demo"+(++demoSeq)+"-"+Date.now().toString(36);
-    const sym = ["PEPU","WIFI","BONKO","MOODENG2","GIGA","CHILL","NUB","SLERF2"][Math.floor(Math.random()*8)];
-    const price = Math.random()*0.002+0.00001;
-    st.hold[mint] = {price, sym, entry:price};
-    onEvent({type:"buy", mint, sym, usd:20+Math.random()*260, price, t:Date.now()});
-  }else if(held.length){
-    const mint = held[Math.floor(Math.random()*held.length)], h = st.hold[mint];
-    const win = Math.random() < c.skill;
-    h.price = h.entry * (win ? 1+Math.random()*2.2 : 1-Math.random()*.45);
-    const frac = Math.random()<.35 ? .5 : 1;
-    onEvent({type:"sell", mint, sym:h.sym, price:h.price, frac, t:Date.now()});
-    if(frac===1) delete st.hold[mint]; else h.entry = h.price;
-  }
+  S.run.slots.forEach((s,i)=>{
+    if(!s) return;
+    const st = S.run.demo[s.addr] || (S.run.demo[s.addr] = {hold:{}});
+    for(const [m,h] of Object.entries(st.hold)){ h.price *= Math.exp((Math.random()-.5)*.05); const p = S.run.positions[s.addr+":"+m]; if(p) p.last = h.price; }
+    if(Math.random() > .12) return;
+    const held = Object.keys(st.hold);
+    if(held.length < 2 && (!held.length || Math.random() < .45)){
+      const mint = "demo"+(++demoSeq)+"-"+Date.now().toString(36);
+      const sym = DEMO_SYMS[Math.floor(Math.random()*DEMO_SYMS.length)], price = Math.random()*.002+.00001;
+      st.hold[mint] = {price, sym, entry:price};
+      handle(i, {type:"buy", mint, sym, usd:20+Math.random()*260, price, t:Date.now()});
+    }else if(held.length){
+      const mint = held[Math.floor(Math.random()*held.length)], h = st.hold[mint];
+      const win = Math.random() < s.skill;
+      h.price = h.entry*(win ? 1+Math.random()*2.2 : 1-Math.random()*.45);
+      const frac = Math.random() < .35 ? .5 : 1;
+      if(frac===1) delete st.hold[mint]; else h.entry = h.price;
+      handle(i, {type:"sell", mint, sym:h.sym, price:h.price, frac, t:Date.now()});
+    }
+  });
 }
 
 /* ---------- 実データ（Solana） ---------- */
@@ -494,7 +516,7 @@ function parseSwap(tx, wallet, solPrice){
     if(d!==0 && (!best || Math.abs(d) > Math.abs(best.d))) best = {m, d, pre:pre[m]||0, post:post[m]||0};
   }
   if(!best) return null;
-  const quote = sol*solPrice + usd;               // 相手の手元に入った（+）/出た（-）ドル
+  const quote = sol*solPrice + usd;
   const t = (tx.blockTime||Date.now()/1000)*1000;
   if(best.d > 0 && quote < -0.5) return {type:"buy", mint:best.m, usd:-quote, price:-quote/best.d, t};
   if(best.d < 0 && quote > 0.05){
@@ -504,40 +526,220 @@ function parseSwap(tx, wallet, solPrice){
   return null;
 }
 const symCache = {};
-async function liveTick(){
-  const c = current(); if(!c) return;
-  const r = S.run;
-  if(!r.lastSig){
-    const first = await rpc("getSignaturesForAddress",[c.addr,{limit:1}]);
-    r.lastSig = first[0]?.signature || "none";
-    status(`${c.name} の監視を開始しました`); return;
+async function pollSlot(i, solPrice){
+  const s = S.run.slots[i];
+  if(!s.lastSig){
+    const first = await rpc("getSignaturesForAddress",[s.addr,{limit:1}]);
+    s.lastSig = first[0]?.signature || "none";
+    return;
   }
-  const opt = {limit:25}; if(r.lastSig!=="none") opt.until = r.lastSig;
-  const sigs = await rpc("getSignaturesForAddress",[c.addr,opt]);
-  const solPrice = await getSolUsd();
+  const opt = {limit:25}; if(s.lastSig !== "none") opt.until = s.lastSig;
+  const sigs = await rpc("getSignaturesForAddress",[s.addr,opt]);
   for(const sg of sigs.reverse()){
-    if(current() !== c) break;
+    if(S.run.slots[i] !== s) break;
     if(!sg.err){
       const tx = await rpc("getTransaction",[sg.signature,{encoding:"jsonParsed",maxSupportedTransactionVersion:0,commitment:"confirmed"}]);
-      const ev = parseSwap(tx, c.addr, solPrice);
+      const ev = parseSwap(tx, s.addr, solPrice);
       if(ev){
         if(!symCache[ev.mint]){ try{ const m = await dexPrices([ev.mint]); symCache[ev.mint] = m[ev.mint]?.sym || shortMint(ev.mint); }catch(e){ symCache[ev.mint] = shortMint(ev.mint); } }
         ev.sym = symCache[ev.mint];
-        onEvent(ev);
+        handle(i, ev);
       }
     }
-    if(current() === c) r.lastSig = sg.signature;
+    if(S.run.slots[i] === s) s.lastSig = sg.signature;
     save();
   }
-  // 保有銘柄の現在値を30秒ごとに更新
-  const mints = Object.keys(r.positions);
+}
+async function liveTick(){
+  const t0 = performance.now(), solPrice = await getSolUsd();
+  let ok = 0, errs = [];
+  for(let i=0;i<S.run.slots.length;i++){
+    if(!S.run.slots[i]) continue;
+    try{ await pollSlot(i, solPrice); ok++; }catch(e){ errs.push(e.message); }
+  }
+  const mints = [...new Set(Object.values(S.run.positions).map(p=>p.mint))];
   if(mints.length && Date.now()-marksAt > 30000){
     marksAt = Date.now();
-    const m = await dexPrices(mints);
-    for(const k of mints) if(m[k] && r.positions[k]) r.positions[k].last = m[k].price;
+    try{ const m = await dexPrices(mints); for(const p of Object.values(S.run.positions)) if(m[p.mint]) p.last = m[p.mint].price; }catch(e){}
   }
-  status(`最終確認 ${new Date().toLocaleTimeString("ja-JP")}（RPC: ${rpcHost()}）`);
+  const secs = ((performance.now()-t0)/1000).toFixed(1);
+  S.run.lastSync = {t:Date.now(), ok, secs};
+  if(errs.length) status(`エラー: ${errs[0]}（${errs.length}人ぶん。次の確認で再試行します）`, true);
+  else status(`${ok}人を同期 · ${secs}秒 · ${new Date().toLocaleTimeString("ja-JP")}（RPC: ${rpcHost()}）`);
+  if(!S.run.lastSyncLog || Date.now()-S.run.lastSyncLog > 300000){ S.run.lastSyncLog = Date.now(); log("SYNC", `${ok}人を同期 · ${secs}秒`); }
 }
+
+/* ---------- 残高の記録 ---------- */
+function record(){
+  const r = S.run, eq = equity(), now = Date.now(), last = r.hist[r.hist.length-1];
+  r.peak = Math.max(r.peak, eq);
+  r.maxDD = Math.min(r.maxDD, (eq - r.peak)/r.peak);
+  if(!last || now-last.t > 15000 || Math.abs(eq-last.v) > Math.max(0.01, last.v*0.002)) r.hist.push({t:now, v:eq});
+  if(r.hist.length > 1200) r.hist = r.hist.filter((_,i)=> i%2===0 || i===r.hist.length-1);
+}
+
+/* ---------- 表示 ---------- */
+function render(){
+  const r = S.run, st = S.settings, eq = equity(), pnl = eq - r.startCash;
+  $("equity").textContent = fmt$(eq);
+  $("eqSub").textContent = `開始 ${fmt$(r.startCash)}` + (r.hist[0] ? ` · ${hhmm(r.hist[0].t)}` : "");
+  $("pnl").textContent = fmtSigned(pnl);
+  $("pnl").className = "big num " + (pnl>0?"win":pnl<0?"loss":"");
+  $("pnlSub").textContent = `${pnl>=0?"+":""}${(pnl/r.startCash*100).toFixed(1)}%`;
+  $("pnlTile").style.borderLeftColor = pnl>0 ? "var(--win)" : pnl<0 ? "var(--loss)" : "var(--line)";
+  const now = (eq - r.peak)/r.peak;
+  $("dd").textContent = (r.maxDD*100).toFixed(1)+"%";
+  $("ddSub").textContent = `現在 ${(now*100).toFixed(1)}% · ピーク ${fmt$(r.peak)}`;
+  drawGauge(Math.min(1, -r.maxDD/0.3));
+  const sells = r.trades.filter(t=>t.side!=="buy"), wins = sells.filter(t=>t.pnl>0).length;
+  drawRing(sells.length ? wins/sells.length : null);
+  $("wW").textContent = `${wins}勝`; $("wL").textContent = `${sells.length-wins}敗`;
+
+  const pill = $("pill"), demo = st.mode === "demo";
+  $("pillText").textContent = running ? (demo ? "DEMO" : "LIVE") : "停止中";
+  pill.className = "pill" + (running ? (demo ? " demo" : " live") : "");
+  $("metaInfo").textContent = `${active().length} wallets · ${r.copies} copies`;
+  $("btnRun").textContent = running ? "停止" : (active().length ? "再開" : "開始");
+
+  // ログ
+  const lg = $("log"), atBottom = lg.scrollHeight - lg.scrollTop - lg.clientHeight < 30;
+  lg.replaceChildren();
+  if(!r.log.length) lg.append(el("div","muted","開始すると、ここに売買の流れが出ます。"));
+  for(const e of r.log.slice(-80)){
+    const ln = el("div","ln"); ln.append(el("span","k-"+e.k,`[${e.k}]`), el("span",null,e.text)); lg.append(ln);
+  }
+  if(atBottom) lg.scrollTop = lg.scrollHeight;
+  $("logCount").textContent = `${sells.length} 決済`;
+
+  // 目標
+  const tgt = Math.max(st.target, r.startCash+0.01), prog = Math.max(0, Math.min(1, (eq-r.startCash)/(tgt-r.startCash)));
+  $("targetLabel").textContent = `目標 ${fmt$(tgt)}`;
+  $("targetBar").style.width = (prog*100).toFixed(1)+"%";
+  $("targetPct").textContent = Math.round(prog*100)+"%";
+
+  // ウォレット
+  const ws = $("wallets"); ws.replaceChildren();
+  const maxAbs = Math.max(0.01, ...active().map(s=>Math.abs(s.pnl)));
+  const n = Math.min(MAX_SLOTS, Math.max(1, st.slots));
+  for(let i=0;i<n;i++){
+    const s = r.slots[i], color = `var(--c${i+1})`;
+    if(!s){ ws.append(el("div","card w empty", running||active().length ? "空き枠（候補なし）" : `枠 ${i+1}`)); continue; }
+    const holding = Object.values(r.positions).some(p=>p.addr===s.addr);
+    const c = el("div","card w"+(holding?" copying":""));
+    const top = el("div","top");
+    const av = el("span","av",(s.name.replace(/^demo_/,"").match(/[A-Za-z0-9ぁ-んァ-ン一-龥]/)||["?"])[0].toUpperCase()); av.style.background = color;
+    const rank = rankOf(s.addr);
+    top.append(av, holding ? el("span","badge","COPYING") : el("span","rk", rank ? "#"+rank : "圏外"));
+    const cp = el("div","cp"), dots = el("span","dots");
+    for(let k=0;k<st.lossLimit;k++) dots.append(el("i", k<s.streak ? "on" : ""));
+    const b = el("b", s.pnl>0?"win":s.pnl<0?"loss":"muted", fmtSigned(s.pnl));
+    const lbl = el("span","muted","コピー "); lbl.append(b);
+    cp.append(lbl, dots);
+    const meter = el("div","meter"), bar = el("i"); bar.style.width = (Math.abs(s.pnl)/maxAbs*100).toFixed(0)+"%"; bar.style.background = color; meter.append(bar);
+    c.append(top, el("div","nm",s.name), el("div","st", s.stat ? s.stat : `${s.wins}勝 ${s.losses}敗`), cp, meter);
+    c.title = s.addr;
+    ws.append(c);
+  }
+
+  // 取引
+  const tr = $("tab-trades"); tr.replaceChildren();
+  if(!r.trades.length) tr.append(el("div","empty-msg","まだ取引はありません。"));
+  for(const t of r.trades.slice(-150).reverse()){
+    const it = el("div","item");
+    it.append(el("span","t num",time(t.t)));
+    const d = el("span","d"), cls = t.side==="buy" ? "muted" : t.pnl>0 ? "win" : "loss";
+    d.append(el("span","tag "+cls, t.side==="buy"?"買い":t.side==="close"?"強制決済":"売り"),
+      document.createTextNode(`${t.sym}  ${fmt$(t.usd)} @ ${fmtPrice(t.price)}`), el("div","t",t.who));
+    it.append(d, el("span","r num "+cls, t.side==="buy" ? "" : fmtSigned(t.pnl)));
+    tr.append(it);
+  }
+  // 保有
+  const ps = $("tab-positions"); ps.replaceChildren();
+  const pos = Object.values(r.positions);
+  if(!pos.length) ps.append(el("div","empty-msg","保有中の銘柄はありません。"));
+  for(const p of pos){
+    const val = p.qty*(p.last||p.avg), u = val - p.cost, it = el("div","item");
+    it.append(el("span","t num",time(p.t)));
+    const d = el("span","d"); d.append(document.createTextNode(`${p.sym}  取得 ${fmt$(p.cost)}`), el("div","t",`${p.who} · 平均 ${fmtPrice(p.avg)} / 現在 ${fmtPrice(p.last||p.avg)}`));
+    it.append(d, el("span","r num "+(u>=0?"win":"loss"), fmtSigned(u)));
+    ps.append(it);
+  }
+  drawChart();
+}
+
+const SVGNS = "http://www.w3.org/2000/svg";
+function arc(cx, cy, rad, a0, a1){
+  const p = a => [cx + rad*Math.cos(a), cy - rad*Math.sin(a)];
+  const [x0,y0] = p(a0), [x1,y1] = p(a1);
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${rad} ${rad} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+function drawGauge(f){
+  const a1 = Math.PI - f*Math.PI;
+  $("gauge").innerHTML =
+    `<path d="${arc(36,38,28,Math.PI,0)}" fill="none" stroke="var(--line)" stroke-width="6" stroke-linecap="round"/>` +
+    (f>0.005 ? `<path d="${arc(36,38,28,Math.PI,a1)}" fill="none" stroke="var(--warn)" stroke-width="6" stroke-linecap="round"/>` : "") +
+    `<line x1="36" y1="38" x2="${(36+22*Math.cos(a1)).toFixed(2)}" y2="${(38-22*Math.sin(a1)).toFixed(2)}" stroke="var(--fg)" stroke-width="2" stroke-linecap="round"/>` +
+    `<circle cx="36" cy="38" r="3" fill="var(--fg)"/>`;
+  $("gauge").setAttribute("aria-label", `最大ドローダウン（目盛りは0%〜-30%）`);
+}
+function drawRing(rate){
+  const C = 2*Math.PI*22, v = rate==null ? 0 : rate;
+  $("ring").innerHTML =
+    `<circle cx="28" cy="28" r="22" fill="none" stroke="var(--line)" stroke-width="5"/>` +
+    `<circle cx="28" cy="28" r="22" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" stroke-dasharray="${(C*v).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 28 28)"/>` +
+    `<text x="28" y="32" text-anchor="middle" font-size="12" font-weight="600" font-family="JetBrains Mono,monospace" fill="var(--fg)">${rate==null?"–":Math.round(v*100)+"%"}</text>`;
+}
+
+// 残高の推移（1系列の線グラフ。指でなぞると値を表示）
+let chartPts = [];
+function drawChart(){
+  const box = $("chart"), tip = $("tip"), h = S.run.hist.concat([{t:Date.now(), v:equity()}]);
+  box.querySelector("svg")?.remove();
+  const W = Math.max(240, box.clientWidth), H = box.clientHeight || 210, L = 52, R = 10, T = 10, B = 20;
+  const svg = document.createElementNS(SVGNS,"svg"); svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("role","img");
+  if(h.length < 3){ svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" class="axis">開始すると残高の推移がここに出ます</text>`; box.prepend(svg); chartPts=[]; $("chartRange").textContent=""; return; }
+  const t0 = h[0].t, t1 = h[h.length-1].t, vs = h.map(p=>p.v);
+  let lo = Math.min(...vs, S.run.startCash), hi = Math.max(...vs, S.run.startCash);
+  const padv = (hi-lo)*0.1 || hi*0.05 || 1; lo -= padv; hi += padv;
+  const x = t => L + (t-t0)/Math.max(1,t1-t0)*(W-L-R), y = v => T + (hi-v)/(hi-lo)*(H-T-B);
+  chartPts = h.map(p=>({x:x(p.t), y:y(p.v), t:p.t, v:p.v}));
+  const line = chartPts.map((p,i)=>(i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1)).join("");
+  const area = line + `L${chartPts.at(-1).x.toFixed(1)} ${H-B}L${L} ${H-B}Z`;
+  let g = "";
+  for(const v of [hi-padv, (hi+lo)/2, lo+padv]){
+    g += `<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/>`;
+    g += `<text x="${L-6}" y="${(y(v)+3).toFixed(1)}" text-anchor="end" class="axis">${fmtK(v)}</text>`;
+  }
+  const sy = y(S.run.startCash).toFixed(1);
+  g += `<line x1="${L}" x2="${W-R}" y1="${sy}" y2="${sy}" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3 4"/>`;
+  g += `<text x="${L}" y="${H-5}" class="axis">${hhmm(t0)}</text><text x="${W-R}" y="${H-5}" text-anchor="end" class="axis">${hhmm(t1)}</text>`;
+  const end = chartPts.at(-1);
+  svg.innerHTML = `<defs><linearGradient id="fillg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".22"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>`
+    + g + `<path d="${area}" fill="url(#fillg)"/><path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>`
+    + `<circle cx="${end.x.toFixed(1)}" cy="${end.y.toFixed(1)}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>`
+    + `<line id="xhair" x1="0" x2="0" y1="${T}" y2="${H-B}" stroke="var(--muted)" stroke-width="1" visibility="hidden"/>`
+    + `<circle id="xdot" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`;
+  box.prepend(svg);
+  $("chartRange").textContent = `${hhmm(t0)} → ${hhmm(t1)}`;
+}
+function hover(e){
+  if(!chartPts.length) return;
+  const box = $("chart"), rect = box.getBoundingClientRect(), svg = box.querySelector("svg");
+  const W = svg.viewBox.baseVal.width, mx = (e.clientX - rect.left) * W / rect.width;
+  let best = chartPts[0]; for(const p of chartPts) if(Math.abs(p.x-mx) < Math.abs(best.x-mx)) best = p;
+  const xh = svg.querySelector("#xhair"), xd = svg.querySelector("#xdot");
+  xh.setAttribute("x1",best.x); xh.setAttribute("x2",best.x); xh.setAttribute("visibility","visible");
+  xd.setAttribute("cx",best.x); xd.setAttribute("cy",best.y); xd.setAttribute("visibility","visible");
+  const tip = $("tip"); tip.hidden = false; tip.textContent = `${fmt$(best.v)} · ${hhmm(best.t)}`;
+  tip.style.left = Math.min(rect.width-60, Math.max(60, best.x*rect.width/W))+"px"; tip.style.top = (best.y*rect.height/svg.viewBox.baseVal.height)+"px";
+}
+function unhover(){ $("tip").hidden = true; const svg = $("chart").querySelector("svg"); svg?.querySelector("#xhair")?.setAttribute("visibility","hidden"); svg?.querySelector("#xdot")?.setAttribute("visibility","hidden"); }
+$("chart").addEventListener("pointermove", hover);
+$("chart").addEventListener("pointerleave", unhover);
+let hoverHold = false;
+$("chart").addEventListener("pointerdown", ()=>{ hoverHold = true; });
+$("chart").addEventListener("pointerup", ()=>{ hoverHold = false; setTimeout(unhover, 1500); });
+addEventListener("resize", ()=>drawChart());
 
 /* ---------- 実行制御 ---------- */
 async function tick(){
@@ -546,17 +748,18 @@ async function tick(){
   try{
     if(S.settings.mode === "demo") demoTick(); else await liveTick();
   }catch(e){ status("エラー: "+e.message+"（次の確認で再試行します）", true); }
-  busy = false; save(); render();
+  record();
+  busy = false; save();
+  if(!hoverHold) render();
   if(running) timer = setTimeout(tick, S.settings.mode==="demo" ? 1000 : S.settings.pollSec*1000);
 }
 async function start(){
   const list = traderList();
   if(!list.length){ status("設定タブでフォロー候補を1人以上入れてください。", true); showTab("settings"); return; }
-  if(!S.run.cur){
-    if(list.every(t => S.run.fired.includes(t.addr))){ status("リストの全員を解雇済みです。新しいランキングを貼り直すか、リセットしてください。", true); return; }
-    hireNext();
-  }
+  fillSlots();
+  if(!active().length){ status("リストの全員を解雇済みです。新しいランキングを貼り直すか、リセットしてください。", true); render(); return; }
   running = true;
+  if(!S.run.hist.length) record();
   try{ wakeLock = await navigator.wakeLock?.request("screen"); }catch(e){}
   save(); render(); tick();
 }
@@ -576,50 +779,53 @@ document.addEventListener("visibilitychange", async ()=>{
 $("btnRun").onclick = () => running ? stop() : start();
 $("btnReset").onclick = () => { $("confirmReset").hidden = false; };
 $("btnResetNo").onclick = () => { $("confirmReset").hidden = true; };
-$("btnResetYes").onclick = () => { stop(); S.run = freshRun(S.settings); save(); $("confirmReset").hidden = true; status("初期化しました"); render(); };
+$("btnResetYes").onclick = () => { stop(); S.run = freshRun(S.settings); save(); $("confirmReset").hidden = true; status("初期化しました"); updatePreview(); render(); };
 
 function showTab(name){
   for(const b of document.querySelectorAll("nav button")) b.setAttribute("aria-selected", b.dataset.tab===name);
-  for(const t of ["timeline","trades","positions","settings"]) $("tab-"+t).hidden = t!==name;
+  for(const t of ["trades","positions","settings"]) $("tab-"+t).hidden = t!==name;
   try{ localStorage.setItem(KEY+".tab", name); }catch(e){}
 }
 for(const b of document.querySelectorAll("nav button")) b.onclick = () => showTab(b.dataset.tab);
 
-const fields = ["mode","startCash","ratio","lossLimit","pollSec","slip","fee","traders","rpc"];
+const fields = ["mode","slots","lossLimit","startCash","target","ratio","pollSec","slip","fee","traders","rpc"];
 function fillForm(){ for(const f of fields) $(f).value = S.settings[f]; }
 $("settingsForm").onsubmit = e => {
   e.preventDefault();
   const before = S.settings.mode, n = {};
   for(const f of fields){ const v=$(f).value; n[f] = ["mode","traders","rpc"].includes(f) ? v.trim() : +v; }
-  n.lossLimit = Math.max(1, Math.round(n.lossLimit)); n.pollSec = Math.max(3, n.pollSec);
+  n.slots = Math.min(MAX_SLOTS, Math.max(1, Math.round(n.slots||1)));
+  n.lossLimit = Math.max(1, Math.round(n.lossLimit||1)); n.pollSec = Math.max(5, n.pollSec||15);
   const modeChanged = n.mode !== before, cashChanged = n.startCash !== S.settings.startCash;
   Object.assign(S.settings, n);
-  if(modeChanged || (cashChanged && !S.run.cur && !S.run.timeline.length)){ stop(); S.run = freshRun(S.settings); }
-  save(); render();
-  const n2 = parseCandidates(S.settings.traders).length;
+  if(modeChanged || (cashChanged && !S.run.trades.length)){ stop(); S.run = freshRun(S.settings); }
+  else if(active().length) fillSlots();      // 人数の変更や新しいリストを、動いている枠に反映
+  save(); fillForm(); updatePreview(); render();
   $("savedMsg").textContent = "保存しました" + (modeChanged?"。モードを切り替えたので履歴を初期化しました":"")
-    + (S.settings.mode==="live" ? `。フォロー候補は${n2}人です` : "");
+    + (S.settings.mode==="live" ? `。フォロー候補は${parseCandidates(S.settings.traders).length}人です` : "");
 };
 
 function updatePreview(){
   const list = parseCandidates($("traders").value), ol = $("previewList");
   ol.replaceChildren();
   $("previewCount").textContent = $("traders").value.trim()
-    ? (list.length ? `${list.length}人を読み取りました（この順で雇います）` : "ウォレットアドレスが見つかりません")
+    ? (list.length ? `${list.length}人を読み取りました（上から${Math.min(list.length, +$("slots").value||8)}人を雇います）` : "ウォレットアドレスが見つかりません")
     : "まだ読み取っていません";
   for(const t of list.slice(0,50)){
     const li = el("li", null, t.name);
-    if(S.run.fired.includes(t.addr)) li.className = "muted", li.append(" （解雇済み）");
+    if(t.stat) li.append(el("span","num",t.stat));
+    if(S.run.fired.includes(t.addr)) li.className = "muted", li.append("（解雇済み）");
     li.append(el("span","num",shortMint(t.addr)));
     ol.append(li);
   }
 }
 $("traders").addEventListener("input", updatePreview);
+$("slots").addEventListener("input", updatePreview);
 $("btnClear").onclick = () => { $("traders").value = ""; updatePreview(); $("traders").focus(); };
 
 fillForm();
 updatePreview();
-try{ const t = localStorage.getItem(KEY+".tab"); if(t) showTab(t); }catch(e){}
+try{ const t = localStorage.getItem(KEY+".tab"); if(t && $("tab-"+t)) showTab(t); }catch(e){}
 render();
 </script>
 </body>
