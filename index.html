@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>フォローBot</title>
+<meta name="theme-color" content="#0f1a17">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="フォローBot">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* 1カラムの操作盤：上に残高、その下に現在のフォロー先、タブで履歴と設定 */
+:root{
+  --bg:#f3f5f2; --surface:#ffffff; --line:#d9e0db; --fg:#18211d; --muted:#5d6b64;
+  --accent:#0f7a5c; --accent-fg:#ffffff; --win:#11804f; --loss:#c23b2e; --warn:#a86a00;
+  --font-body:"Zen Kaku Gothic New",system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  --font-num:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1a17; --surface:#16231f; --line:#27382f; --fg:#e4ece7; --muted:#93a59b;
+  --accent:#3fc896; --accent-fg:#06140f; --win:#4fd69a; --loss:#ff7a6b; --warn:#f0b54a;
+  color-scheme:dark;
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{
+  background:var(--bg); color:var(--fg); font-family:var(--font-body); font-size:15px; line-height:1.55;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:calc(24px + env(safe-area-inset-bottom,0px));
+  padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px));
+  -webkit-text-size-adjust:100%;
+}
+main{max-width:560px; margin:0 auto; display:flex; flex-direction:column; gap:16px; padding-block:16px}
+.num{font-family:var(--font-num); font-variant-numeric:tabular-nums}
+header{display:flex; align-items:center; justify-content:space-between; gap:12px}
+h1{font-size:18px; margin:0; letter-spacing:.02em}
+.pill{font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); color:var(--muted); white-space:nowrap}
+.pill.run{border-color:var(--accent); color:var(--accent)}
+.pill.demo{border-color:var(--warn); color:var(--warn)}
+.equity{display:flex; flex-direction:column; gap:2px}
+.equity .label{font-size:12px; color:var(--muted); letter-spacing:.06em}
+.equity .big{font-size:40px; font-weight:600; line-height:1.1}
+.equity .sub{font-size:14px}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+.stat{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:8px 10px; min-width:0}
+.stat .k{font-size:11px; color:var(--muted)}
+.stat .v{font-size:16px; font-weight:600}
+.trader{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:8px}
+.trader .row{display:flex; justify-content:space-between; align-items:baseline; gap:8px}
+.trader .name{font-size:18px; font-weight:700; overflow-wrap:anywhere; min-width:0}
+.trader .rank{font-size:13px; color:var(--muted)}
+.streak{display:flex; gap:6px; align-items:center; font-size:12px; color:var(--muted)}
+.dot{width:12px; height:12px; border-radius:50%; border:2px solid var(--line)}
+.dot.on{background:var(--loss); border-color:var(--loss)}
+.addr{font-size:11px; color:var(--muted); overflow-wrap:anywhere}
+.controls{display:flex; gap:8px}
+button{font:inherit; border-radius:10px; border:1px solid var(--line); background:var(--surface); color:var(--fg); padding:12px 14px; cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+button.primary{background:var(--accent); color:var(--accent-fg); border-color:var(--accent); font-weight:700; flex:1}
+button.danger{color:var(--loss)}
+button.ghost{background:transparent}
+.status{font-size:12px; color:var(--muted); min-height:1.5em; overflow-wrap:anywhere}
+.status.err{color:var(--loss)}
+nav{display:flex; border-bottom:1px solid var(--line); gap:4px; overflow-x:auto}
+nav button{border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; padding:10px 12px; color:var(--muted); white-space:nowrap}
+nav button[aria-selected="true"]{color:var(--fg); border-bottom-color:var(--accent); font-weight:700}
+.list{display:flex; flex-direction:column}
+.item{display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; padding:10px 0; border-bottom:1px solid var(--line); align-items:baseline}
+.item .t{font-size:12px; color:var(--muted)}
+.item .d{min-width:0; overflow-wrap:anywhere}
+.item .r{text-align:right; white-space:nowrap}
+.item .tag{font-size:11px; padding:1px 6px; border-radius:4px; border:1px solid currentColor; margin-right:6px}
+.win{color:var(--win)} .loss{color:var(--loss)} .muted{color:var(--muted)}
+.empty{color:var(--muted); font-size:14px; padding:20px 0}
+form{display:flex; flex-direction:column; gap:14px}
+label{display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted)}
+label .hint{font-size:12px}
+input,textarea,select{font:inherit; font-size:16px; color:var(--fg); background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px; width:100%; min-width:0}
+textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+.note{font-size:13px; color:var(--muted); background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px}
+.note b{color:var(--fg)}
+.confirm{display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px}
+@media (prefers-reduced-motion:no-preference){.pill.run{animation:pulse 2s ease-in-out infinite}}
+@keyframes pulse{50%{opacity:.55}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>フォローBot</h1>
+    <span id="pill" class="pill">停止中</span>
+  </header>
+
+  <section class="equity" aria-label="残高">
+    <span class="label">仮想資金の評価額</span>
+    <span id="equity" class="big num">$0.00</span>
+    <span id="pnl" class="sub num">±$0.00</span>
+  </section>
+
+  <section class="stats">
+    <div class="stat"><div class="k">取引</div><div id="sTrades" class="v num">0</div></div>
+    <div class="stat"><div class="k">勝ち</div><div id="sWins" class="v num win">0</div></div>
+    <div class="stat"><div class="k">負け</div><div id="sLosses" class="v num loss">0</div></div>
+    <div class="stat"><div class="k">勝率</div><div id="sRate" class="v num">–</div></div>
+  </section>
+
+  <section class="trader" aria-label="現在のフォロー先">
+    <div class="row">
+      <span id="tName" class="name">未選択</span>
+      <span id="tRank" class="rank"></span>
+    </div>
+    <div id="tAddr" class="addr num"></div>
+    <div class="streak"><span>連敗</span><span id="tDots"></span><span id="tInfo"></span></div>
+  </section>
+
+  <div class="controls">
+    <button id="btnRun" class="primary" type="button">開始</button>
+    <button id="btnReset" class="danger" type="button">リセット</button>
+  </div>
+  <div id="confirmReset" class="confirm" hidden>
+    <span>履歴と仮想資金をすべて初期化します。</span>
+    <button id="btnResetYes" class="danger" type="button">初期化する</button>
+    <button id="btnResetNo" class="ghost" type="button">やめる</button>
+  </div>
+  <div id="status" class="status" role="status"></div>
+
+  <nav role="tablist">
+    <button role="tab" data-tab="timeline" aria-selected="true">交代履歴</button>
+    <button role="tab" data-tab="trades" aria-selected="false">取引</button>
+    <button role="tab" data-tab="positions" aria-selected="false">保有中</button>
+    <button role="tab" data-tab="settings" aria-selected="false">設定</button>
+  </nav>
+
+  <section id="tab-timeline" class="list"></section>
+  <section id="tab-trades" class="list" hidden></section>
+  <section id="tab-positions" class="list" hidden></section>
+  <section id="tab-settings" hidden>
+    <form id="settingsForm">
+      <label>モード
+        <select id="mode">
+          <option value="demo">デモ（架空のトレーダーで動作確認）</option>
+          <option value="live">実データ（Solanaの実際の取引を仮想資金で追従）</option>
+        </select>
+      </label>
+      <div class="grid2">
+        <label>開始資金（$）<input id="startCash" type="number" step="0.01" min="1" inputmode="decimal"></label>
+        <label>追従倍率<input id="ratio" type="number" step="0.01" min="0.01" inputmode="decimal"></label>
+        <label>交代する連敗数<input id="lossLimit" type="number" step="1" min="1" inputmode="numeric"></label>
+        <label>確認間隔（秒）<input id="pollSec" type="number" step="1" min="3" inputmode="numeric"></label>
+        <label>スリッページ（%）<input id="slip" type="number" step="0.1" min="0" inputmode="decimal"></label>
+        <label>手数料（1回 $）<input id="fee" type="number" step="0.01" min="0" inputmode="decimal"></label>
+      </div>
+      <label>フォロー候補（上から順位順）
+        <textarea id="traders" spellcheck="false" placeholder="名前 ウォレットアドレス"></textarea>
+        <span class="hint">1行に「名前 アドレス」。週間ランキングの上位から順に貼り付けてください。上の人から順に雇い、連敗したら次の人に交代します。</span>
+      </label>
+      <label>Solana RPC URL
+        <input id="rpc" type="text" inputmode="url" autocomplete="off" spellcheck="false">
+        <span class="hint">公開RPCは混むと失敗します。安定させたい場合はHeliusなどの無料RPCのURLを入れてください。</span>
+      </label>
+      <button class="primary" type="submit">設定を保存</button>
+      <div id="savedMsg" class="status"></div>
+    </form>
+    <div class="note" style="margin-top:16px">
+      <b>このアプリでできること</b><br>
+      ・候補リストの上位トレーダーの売買を監視し、追従倍率ぶんの金額で同じ銘柄を<b>仮想資金で</b>売買します。<br>
+      ・相手が売ったら同じ割合だけ決済します。決済が設定回数続けて損失なら、そのトレーダーを解雇して次の候補を雇います。<br>
+      ・解雇時に保有中の銘柄はその時点の価格で決済します。<br>
+      ・実際のお金は動きません。ウォレットや秘密鍵は不要です。<br><br>
+      <b>注意</b><br>
+      ・画面を閉じている間は動きません。開き直すと、止まっていた間の取引（最大25件）をまとめて反映します。<br>
+      ・価格はトレーダー本人の約定価格にスリッページを足した概算です。実際の追従では遅れの分さらに不利になります。
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const SOL = "So11111111111111111111111111111111111111112";
+const USD_MINTS = new Set(["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v","Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"]);
+const KEY = "followbot.v1";
+const DEMO_TRADERS = [
+  {name:"demo_kaito", addr:"demo-1", skill:.38},
+  {name:"demo_mio",   addr:"demo-2", skill:.45},
+  {name:"demo_ren",   addr:"demo-3", skill:.68},
+  {name:"demo_yui",   addr:"demo-4", skill:.55},
+  {name:"demo_sora",  addr:"demo-5", skill:.6},
+];
+
+const defaults = () => ({
+  settings:{mode:"demo", startCash:52, ratio:.25, lossLimit:2, pollSec:10, slip:1, fee:.02,
+    rpc:"https://api.mainnet-beta.solana.com", traders:""},
+  run:null,
+});
+function freshRun(s){
+  return {cash:+s.startCash, startCash:+s.startCash, idx:-1, fired:[], streak:0, lastSig:null,
+    positions:{}, trades:[], timeline:[], hiredTrades:0, demo:{}, startedAt:Date.now()};
+}
+
+let S;
+try{ S = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY)||"{}")); }catch(e){ S = defaults(); }
+S.settings = Object.assign(defaults().settings, S.settings);
+if(!S.run) S.run = freshRun(S.settings);
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+
+let running = false, timer = null, busy = false, wakeLock = null;
+let solUsd = null, solUsdAt = 0, marksAt = 0;
+const $ = id => document.getElementById(id);
+
+/* ---------- 候補リスト ---------- */
+function traderList(){
+  if(S.settings.mode === "demo") return DEMO_TRADERS;
+  return S.settings.traders.split("\n").map(l=>l.trim()).filter(Boolean).map((l,i)=>{
+    const parts = l.split(/[\s,]+/);
+    const addr = parts.find(p=>/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p));
+    if(!addr) return null;
+    const name = parts.filter(p=>p!==addr).join(" ") || addr.slice(0,4)+"…"+addr.slice(-4);
+    return {name, addr};
+  }).filter(Boolean);
+}
+function current(){ const l = traderList(); return S.run.idx>=0 ? l[S.run.idx] : null; }
+
+/* ---------- 表示 ---------- */
+const fmt$ = v => (v<0?"-$":"$")+Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtSigned = v => (v>=0?"+":"-")+"$"+Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtPrice = v => v>=1 ? "$"+v.toFixed(4) : "$"+Number(v.toPrecision(3));
+const time = t => new Date(t).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});
+function el(tag, cls, text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
+function equity(){ let v=S.run.cash; for(const p of Object.values(S.run.positions)) v += p.qty*(p.last||p.avg); return v; }
+function shortMint(m){ return m.slice(0,4)+"…"+m.slice(-4); }
+
+function render(){
+  const r = S.run, eq = equity(), pnl = eq - r.startCash;
+  $("equity").textContent = fmt$(eq);
+  $("pnl").textContent = `${fmtSigned(pnl)}（${(pnl/r.startCash*100).toFixed(1)}%）開始 ${fmt$(r.startCash)}`;
+  $("pnl").className = "sub num " + (pnl>0?"win":pnl<0?"loss":"muted");
+  const sells = r.trades.filter(t=>t.side!=="buy");
+  const wins = sells.filter(t=>t.pnl>0).length, losses = sells.length-wins;
+  $("sTrades").textContent = sells.length; $("sWins").textContent = wins; $("sLosses").textContent = losses;
+  $("sRate").textContent = sells.length ? Math.round(wins/sells.length*100)+"%" : "–";
+
+  const pill = $("pill");
+  pill.textContent = running ? (S.settings.mode==="demo"?"デモ稼働中":"稼働中") : "停止中";
+  pill.className = "pill" + (running ? (S.settings.mode==="demo"?" demo":" run") : "");
+  $("btnRun").textContent = running ? "停止" : (r.idx<0 ? "開始" : "再開");
+
+  const c = current();
+  $("tName").textContent = c ? c.name : "未選択";
+  $("tRank").textContent = c ? `ランキング #${r.idx+1}` : "";
+  $("tAddr").textContent = c && S.settings.mode==="live" ? c.addr : "";
+  const dots = $("tDots"); dots.replaceChildren();
+  for(let i=0;i<S.settings.lossLimit;i++){ dots.append(el("span","dot"+(i<r.streak?" on":""))); }
+  dots.style.display="flex"; dots.style.gap="4px";
+  $("tInfo").textContent = c ? `この人で${r.hiredTrades}回決済` : "";
+
+  // 交代履歴
+  const tl = $("tab-timeline"); tl.replaceChildren();
+  if(!r.timeline.length) tl.append(el("div","empty","まだ履歴はありません。「開始」を押すと、候補リストの1位から雇います。"));
+  for(const e of [...r.timeline].reverse()){
+    const it = el("div","item");
+    it.append(el("span","t num",time(e.t)));
+    const d = el("span","d");
+    const tagCls = e.kind==="hire"?"win":e.kind==="fire"?"loss":"muted";
+    d.append(el("span","tag "+tagCls,{hire:"雇用",fire:"解雇",info:"情報",stop:"終了"}[e.kind]||"情報"), document.createTextNode(e.text));
+    it.append(d, el("span","r num muted",e.eq!=null?fmt$(e.eq):""));
+    tl.append(it);
+  }
+  // 取引
+  const tr = $("tab-trades"); tr.replaceChildren();
+  if(!r.trades.length) tr.append(el("div","empty","まだ取引はありません。"));
+  for(const t of [...r.trades].reverse()){
+    const it = el("div","item");
+    it.append(el("span","t num",time(t.t)));
+    const d = el("span","d");
+    const label = t.side==="buy"?"買い":t.side==="close"?"強制決済":"売り";
+    d.append(el("span","tag "+(t.side==="buy"?"muted":t.pnl>0?"win":"loss"),label),
+      document.createTextNode(`${t.sym}  ${fmt$(t.usd)} @ ${fmtPrice(t.price)}`));
+    d.append(el("div","t",t.trader));
+    it.append(d, el("span","r num "+(t.side==="buy"?"muted":t.pnl>0?"win":"loss"), t.side==="buy"?"":fmtSigned(t.pnl)));
+    tr.append(it);
+  }
+  // 保有
+  const ps = $("tab-positions"); ps.replaceChildren();
+  const pos = Object.values(r.positions);
+  if(!pos.length) ps.append(el("div","empty","保有中の銘柄はありません。"));
+  for(const p of pos){
+    const val = p.qty*(p.last||p.avg), u = val - p.cost;
+    const it = el("div","item");
+    it.append(el("span","t num",time(p.t)));
+    const d = el("span","d"); d.append(document.createTextNode(`${p.sym}  取得 ${fmt$(p.cost)}`), el("div","t",`平均 ${fmtPrice(p.avg)} / 現在 ${fmtPrice(p.last||p.avg)}`));
+    it.append(d, el("span","r num "+(u>=0?"win":"loss"), fmtSigned(u)));
+    ps.append(it);
+  }
+}
+function status(msg, err){ const s=$("status"); s.textContent=msg||""; s.className="status"+(err?" err":""); }
+function log(kind, text){ S.run.timeline.push({t:Date.now(), kind, text, eq:equity()}); if(S.run.timeline.length>300) S.run.timeline.shift(); }
+
+/* ---------- 売買ロジック（デモ・実データ共通） ---------- */
+function onEvent(ev){
+  // ev: {type:"buy"|"sell", mint, sym, usd(買い時の相手の金額), price, frac(売り時の割合), t}
+  const r = S.run, s = S.settings, who = current().name;
+  if(ev.type === "buy"){
+    const want = ev.usd * s.ratio;
+    const usd = Math.min(want, r.cash - s.fee);
+    if(usd < 0.5){ return; }
+    const price = ev.price * (1 + s.slip/100);
+    const qty = usd / price;
+    const p = r.positions[ev.mint] || (r.positions[ev.mint] = {mint:ev.mint, sym:ev.sym, qty:0, cost:0, avg:0, t:ev.t, trader:who});
+    p.qty += qty; p.cost += usd; p.avg = p.cost/p.qty; p.last = ev.price; p.sym = ev.sym || p.sym;
+    r.cash -= usd + s.fee;
+    pushTrade({side:"buy", sym:p.sym, usd, price, pnl:0, trader:who, t:ev.t});
+  }else{
+    const p = r.positions[ev.mint];
+    if(!p) return;                       // 追従前に買っていた銘柄の売りは無視
+    const frac = Math.min(1, Math.max(0, ev.frac));
+    sellPart(p, frac, ev.price, "sell", ev.t);
+  }
+}
+function sellPart(p, frac, mktPrice, side, t){
+  const r = S.run, s = S.settings, who = current() ? current().name : p.trader;
+  const qty = p.qty*frac, cost = p.cost*frac;
+  const price = mktPrice * (1 - s.slip/100);
+  const proceeds = qty*price - s.fee;
+  const pnl = proceeds - cost;
+  r.cash += proceeds; p.qty -= qty; p.cost -= cost; p.last = mktPrice;
+  if(frac >= 0.999 || p.qty*mktPrice < 0.01) delete r.positions[p.mint];
+  pushTrade({side, sym:p.sym, usd:qty*price, price, pnl, trader:who, t:t||Date.now()});
+  if(side === "close") return;
+  r.hiredTrades++;
+  r.streak = pnl < 0 ? r.streak+1 : 0;
+  if(r.streak >= s.lossLimit) fire();
+}
+function pushTrade(t){ S.run.trades.push(t); if(S.run.trades.length>500) S.run.trades.shift(); }
+
+function fire(){
+  const r = S.run, c = current();
+  for(const p of Object.values(r.positions)) sellPart(p, 1, p.last||p.avg, "close");
+  r.fired.push(r.idx);
+  log("fire", `${c.name}（#${r.idx+1}）を${r.streak}連敗で解雇`);
+  hireNext();
+}
+function hireNext(){
+  const r = S.run, list = traderList();
+  let i = r.idx + 1;
+  while(i < list.length && r.fired.includes(i)) i++;
+  r.streak = 0; r.hiredTrades = 0; r.lastSig = null;
+  if(i >= list.length){
+    r.idx = list.length; log("stop", "候補がいなくなったので停止しました。候補リストを追加してください。");
+    stop(); return false;
+  }
+  r.idx = i;
+  log("hire", `${list[i].name}（#${i+1}）を雇用`);
+  return true;
+}
+
+/* ---------- デモ用の架空トレーダー ---------- */
+let demoSeq = 0;
+function demoTick(){
+  const c = current(); if(!c) return;
+  const st = S.run.demo[c.addr] || (S.run.demo[c.addr] = {hold:{}});
+  // 保有銘柄の価格をゆらす（評価額の表示用）
+  for(const [m,h] of Object.entries(st.hold)){ h.price *= Math.exp((Math.random()-.5)*.06); const p=S.run.positions[m]; if(p) p.last=h.price; }
+  if(Math.random() > .3) return;
+  const held = Object.keys(st.hold);
+  if(held.length < 2 && (held.length===0 || Math.random()<.45)){
+    const mint = "demo"+(++demoSeq)+"-"+Date.now().toString(36);
+    const sym = ["PEPU","WIFI","BONKO","MOODENG2","GIGA","CHILL","NUB","SLERF2"][Math.floor(Math.random()*8)];
+    const price = Math.random()*0.002+0.00001;
+    st.hold[mint] = {price, sym, entry:price};
+    onEvent({type:"buy", mint, sym, usd:20+Math.random()*260, price, t:Date.now()});
+  }else if(held.length){
+    const mint = held[Math.floor(Math.random()*held.length)], h = st.hold[mint];
+    const win = Math.random() < c.skill;
+    h.price = h.entry * (win ? 1+Math.random()*2.2 : 1-Math.random()*.45);
+    const frac = Math.random()<.35 ? .5 : 1;
+    onEvent({type:"sell", mint, sym:h.sym, price:h.price, frac, t:Date.now()});
+    if(frac===1) delete st.hold[mint]; else h.entry = h.price;
+  }
+}
+
+/* ---------- 実データ（Solana） ---------- */
+async function rpc(method, params){
+  const res = await fetch(S.settings.rpc, {method:"POST", headers:{"content-type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0", id:1, method, params})});
+  if(!res.ok) throw new Error(`RPC ${res.status}`);
+  const j = await res.json();
+  if(j.error) throw new Error("RPC: "+j.error.message);
+  return j.result;
+}
+async function getSolUsd(){
+  if(solUsd && Date.now()-solUsdAt < 60000) return solUsd;
+  try{
+    const j = await (await fetch(`https://lite-api.jup.ag/price/v3?ids=${SOL}`)).json();
+    const v = +(j[SOL]?.usdPrice ?? j.data?.[SOL]?.price);
+    if(v>0){ solUsd=v; solUsdAt=Date.now(); return v; }
+  }catch(e){}
+  const m = await dexPrices([SOL]);
+  if(m[SOL]){ solUsd=m[SOL].price; solUsdAt=Date.now(); return solUsd; }
+  if(solUsd) return solUsd;
+  throw new Error("SOLの価格を取得できませんでした");
+}
+async function dexPrices(mints){
+  const out = {};
+  for(let i=0;i<mints.length;i+=30){
+    const chunk = mints.slice(i,i+30);
+    const arr = await (await fetch(`https://api.dexscreener.com/tokens/v1/solana/${chunk.join(",")}`)).json();
+    for(const pr of (Array.isArray(arr)?arr:[])){
+      const m = pr.baseToken?.address; if(!chunk.includes(m)) continue;
+      const liq = pr.liquidity?.usd || 0;
+      if(!out[m] || liq > out[m].liq) out[m] = {price:+pr.priceUsd, sym:pr.baseToken.symbol, liq};
+    }
+  }
+  return out;
+}
+const amt = b => +(b.uiTokenAmount.uiAmountString ?? b.uiTokenAmount.uiAmount ?? 0);
+function parseSwap(tx, wallet, solPrice){
+  if(!tx || !tx.meta || tx.meta.err) return null;
+  const keys = tx.transaction.message.accountKeys.map(k=>typeof k==="string"?k:k.pubkey);
+  const wi = keys.indexOf(wallet);
+  let sol = wi>=0 ? (tx.meta.postBalances[wi]-tx.meta.preBalances[wi])/1e9 : 0;
+  if(wi === 0) sol += tx.meta.fee/1e9;
+  const pre = {}, post = {};
+  for(const b of tx.meta.preTokenBalances||[]) if(b.owner===wallet) pre[b.mint]=(pre[b.mint]||0)+amt(b);
+  for(const b of tx.meta.postTokenBalances||[]) if(b.owner===wallet) post[b.mint]=(post[b.mint]||0)+amt(b);
+  let usd = 0, best = null;
+  for(const m of new Set([...Object.keys(pre),...Object.keys(post)])){
+    const d = (post[m]||0)-(pre[m]||0);
+    if(m===SOL){ sol += d; continue; }
+    if(USD_MINTS.has(m)){ usd += d; continue; }
+    if(d!==0 && (!best || Math.abs(d) > Math.abs(best.d))) best = {m, d, pre:pre[m]||0, post:post[m]||0};
+  }
+  if(!best) return null;
+  const quote = sol*solPrice + usd;               // 相手の手元に入った（+）/出た（-）ドル
+  const t = (tx.blockTime||Date.now()/1000)*1000;
+  if(best.d > 0 && quote < -0.5) return {type:"buy", mint:best.m, usd:-quote, price:-quote/best.d, t};
+  if(best.d < 0 && quote > 0.05){
+    const frac = best.post <= best.pre*0.001 ? 1 : -best.d/best.pre;
+    return {type:"sell", mint:best.m, price:quote/-best.d, frac, t};
+  }
+  return null;
+}
+const symCache = {};
+async function liveTick(){
+  const c = current(); if(!c) return;
+  const r = S.run;
+  if(!r.lastSig){
+    const first = await rpc("getSignaturesForAddress",[c.addr,{limit:1}]);
+    r.lastSig = first[0]?.signature || "none";
+    status(`${c.name} の監視を開始しました`); return;
+  }
+  const opt = {limit:25}; if(r.lastSig!=="none") opt.until = r.lastSig;
+  const sigs = await rpc("getSignaturesForAddress",[c.addr,opt]);
+  const solPrice = await getSolUsd();
+  for(const sg of sigs.reverse()){
+    if(current() !== c) break;
+    if(!sg.err){
+      const tx = await rpc("getTransaction",[sg.signature,{encoding:"jsonParsed",maxSupportedTransactionVersion:0,commitment:"confirmed"}]);
+      const ev = parseSwap(tx, c.addr, solPrice);
+      if(ev){
+        if(!symCache[ev.mint]){ try{ const m = await dexPrices([ev.mint]); symCache[ev.mint] = m[ev.mint]?.sym || shortMint(ev.mint); }catch(e){ symCache[ev.mint] = shortMint(ev.mint); } }
+        ev.sym = symCache[ev.mint];
+        onEvent(ev);
+      }
+    }
+    if(current() === c) r.lastSig = sg.signature;
+    save();
+  }
+  // 保有銘柄の現在値を30秒ごとに更新
+  const mints = Object.keys(r.positions);
+  if(mints.length && Date.now()-marksAt > 30000){
+    marksAt = Date.now();
+    const m = await dexPrices(mints);
+    for(const k of mints) if(m[k] && r.positions[k]) r.positions[k].last = m[k].price;
+  }
+  status(`最終確認 ${new Date().toLocaleTimeString("ja-JP")}`);
+}
+
+/* ---------- 実行制御 ---------- */
+async function tick(){
+  if(!running || busy) return;
+  busy = true;
+  try{
+    if(S.settings.mode === "demo") demoTick(); else await liveTick();
+  }catch(e){ status("エラー: "+e.message+"（次の確認で再試行します）", true); }
+  busy = false; save(); render();
+  if(running) timer = setTimeout(tick, S.settings.mode==="demo" ? 1000 : S.settings.pollSec*1000);
+}
+async function start(){
+  const list = traderList();
+  if(!list.length){ status("設定タブでフォロー候補を1人以上入れてください。", true); showTab("settings"); return; }
+  if(S.run.idx >= list.length){ status("候補がいません。候補リストを追加するか、リセットしてください。", true); return; }
+  running = true;
+  if(S.run.idx < 0) hireNext();
+  try{ wakeLock = await navigator.wakeLock?.request("screen"); }catch(e){}
+  save(); render(); tick();
+}
+function stop(){
+  running = false; clearTimeout(timer);
+  try{ wakeLock?.release(); }catch(e){} wakeLock = null;
+  render();
+}
+document.addEventListener("visibilitychange", async ()=>{
+  if(document.visibilityState==="visible" && running){
+    try{ wakeLock = await navigator.wakeLock?.request("screen"); }catch(e){}
+    clearTimeout(timer); tick();
+  }
+});
+
+/* ---------- 画面操作 ---------- */
+$("btnRun").onclick = () => running ? stop() : start();
+$("btnReset").onclick = () => { $("confirmReset").hidden = false; };
+$("btnResetNo").onclick = () => { $("confirmReset").hidden = true; };
+$("btnResetYes").onclick = () => { stop(); S.run = freshRun(S.settings); save(); $("confirmReset").hidden = true; status("初期化しました"); render(); };
+
+function showTab(name){
+  for(const b of document.querySelectorAll("nav button")) b.setAttribute("aria-selected", b.dataset.tab===name);
+  for(const t of ["timeline","trades","positions","settings"]) $("tab-"+t).hidden = t!==name;
+  try{ localStorage.setItem(KEY+".tab", name); }catch(e){}
+}
+for(const b of document.querySelectorAll("nav button")) b.onclick = () => showTab(b.dataset.tab);
+
+const fields = ["mode","startCash","ratio","lossLimit","pollSec","slip","fee","traders","rpc"];
+function fillForm(){ for(const f of fields) $(f).value = S.settings[f]; }
+$("settingsForm").onsubmit = e => {
+  e.preventDefault();
+  const before = S.settings.mode, n = {};
+  for(const f of fields){ const v=$(f).value; n[f] = ["mode","traders","rpc"].includes(f) ? v.trim() : +v; }
+  n.lossLimit = Math.max(1, Math.round(n.lossLimit)); n.pollSec = Math.max(3, n.pollSec);
+  const modeChanged = n.mode !== before, cashChanged = n.startCash !== S.settings.startCash;
+  Object.assign(S.settings, n);
+  if(modeChanged || (cashChanged && S.run.idx < 0)){ stop(); S.run = freshRun(S.settings); }
+  save(); render();
+  const bad = S.settings.mode==="live" ? S.settings.traders.split("\n").filter(l=>l.trim()).length - traderList().length : 0;
+  $("savedMsg").textContent = "保存しました" + (modeChanged?"。モードを切り替えたので履歴を初期化しました":"") + (bad>0?`。アドレスを読み取れない行が${bad}行あります`:"");
+};
+
+fillForm();
+try{ const t = localStorage.getItem(KEY+".tab"); if(t) showTab(t); }catch(e){}
+render();
+</script>
+</body>
+</html>
