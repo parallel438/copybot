@@ -172,8 +172,8 @@ textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
         <ol id="previewList"></ol>
       </div>
       <label>Solana RPC URL
-        <input id="rpc" type="text" inputmode="url" autocomplete="off" spellcheck="false">
-        <span class="hint">公開RPCは混むと失敗します。安定させたい場合はHeliusなどの無料RPCのURLを入れてください。</span>
+        <input id="rpc" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="空欄でOK（無料の公開RPCを自動で切り替え）">
+        <span class="hint">空欄なら、登録不要の無料RPCを順番に試し、断られたら自動で次に切り替えます。それでも失敗が続くときは、Heliusの無料プラン（登録のみ・課金なし）で発行したURLを入れてください。</span>
       </label>
       <button class="primary" type="submit">設定を保存</button>
       <div id="savedMsg" class="status"></div>
@@ -206,7 +206,7 @@ const DEMO_TRADERS = [
 
 const defaults = () => ({
   settings:{mode:"demo", startCash:52, ratio:.25, lossLimit:2, pollSec:10, slip:1, fee:.02,
-    rpc:"https://api.mainnet-beta.solana.com", traders:""},
+    rpc:"", traders:""},
   run:null,
 });
 function freshRun(s){
@@ -217,6 +217,7 @@ function freshRun(s){
 let S;
 try{ S = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY)||"{}")); }catch(e){ S = defaults(); }
 S.settings = Object.assign(defaults().settings, S.settings);
+if(S.settings.rpc === "https://api.mainnet-beta.solana.com") S.settings.rpc = "";   // 旧初期値は403になりやすいので自動切り替えに移行
 if(!S.run || !("cur" in S.run)) S.run = freshRun(S.settings);
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
 
@@ -423,13 +424,32 @@ function demoTick(){
 }
 
 /* ---------- 実データ（Solana） ---------- */
+// 無料・登録不要の公開RPC。断られたら（403・429など）次のRPCに切り替える
+const FREE_RPCS = [
+  "https://solana-rpc.publicnode.com",
+  "https://solana.api.onfinality.io/public",
+  "https://rpc.nodeflare.app/solana/public",
+  "https://api.mainnet.solana.com",
+  "https://api.mainnet-beta.solana.com",
+];
+let rpcAt = 0;
+const rpcList = () => [...new Set([S.settings.rpc, ...FREE_RPCS].filter(Boolean))];
+const rpcHost = () => { try{ return new URL(rpcList()[rpcAt % rpcList().length]).host; }catch(e){ return ""; } };
 async function rpc(method, params){
-  const res = await fetch(S.settings.rpc, {method:"POST", headers:{"content-type":"application/json"},
-    body:JSON.stringify({jsonrpc:"2.0", id:1, method, params})});
-  if(!res.ok) throw new Error(`RPC ${res.status}`);
-  const j = await res.json();
-  if(j.error) throw new Error("RPC: "+j.error.message);
-  return j.result;
+  const list = rpcList(), errs = [];
+  for(let k=0; k<list.length; k++){
+    const i = (rpcAt + k) % list.length;
+    try{
+      const res = await fetch(list[i], {method:"POST", headers:{"content-type":"application/json"},
+        body:JSON.stringify({jsonrpc:"2.0", id:1, method, params})});
+      if(!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      if(j.error) throw new Error(j.error.message);
+      rpcAt = i;
+      return j.result;
+    }catch(e){ errs.push(`${new URL(list[i]).host}: ${e.message}`); }
+  }
+  throw new Error("どのRPCにもつながりませんでした（" + errs.join(" / ") + "）");
 }
 async function getSolUsd(){
   if(solUsd && Date.now()-solUsdAt < 60000) return solUsd;
@@ -516,7 +536,7 @@ async function liveTick(){
     const m = await dexPrices(mints);
     for(const k of mints) if(m[k] && r.positions[k]) r.positions[k].last = m[k].price;
   }
-  status(`最終確認 ${new Date().toLocaleTimeString("ja-JP")}`);
+  status(`最終確認 ${new Date().toLocaleTimeString("ja-JP")}（RPC: ${rpcHost()}）`);
 }
 
 /* ---------- 実行制御 ---------- */
