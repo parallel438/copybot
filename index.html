@@ -556,6 +556,7 @@ async function liveTick(){
   for(let i=0;i<S.run.slots.length;i++){
     if(!S.run.slots[i]) continue;
     try{ await pollSlot(i, solPrice); ok++; }catch(e){ errs.push(e.message); }
+    record(); render();          // 1人ぶん確認するたびに画面へ反映
   }
   const mints = [...new Set(Object.values(S.run.positions).map(p=>p.mint))];
   if(mints.length && Date.now()-marksAt > 30000){
@@ -721,24 +722,30 @@ function drawChart(){
     + `<circle id="xdot" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`;
   box.prepend(svg);
   $("chartRange").textContent = `${hhmm(t0)} → ${hhmm(t1)}`;
+  if(hoverT != null){ let best = chartPts[0]; for(const p of chartPts) if(Math.abs(p.t-hoverT) < Math.abs(best.t-hoverT)) best = p; showHover(best); }
 }
+// 指で触れた時刻を覚えておき、画面を書き直してもその点の表示を保つ（更新は止めない）
+let hoverT = null, hoverTimer = null;
 function hover(e){
   if(!chartPts.length) return;
   const box = $("chart"), rect = box.getBoundingClientRect(), svg = box.querySelector("svg");
   const W = svg.viewBox.baseVal.width, mx = (e.clientX - rect.left) * W / rect.width;
   let best = chartPts[0]; for(const p of chartPts) if(Math.abs(p.x-mx) < Math.abs(best.x-mx)) best = p;
+  clearTimeout(hoverTimer);
+  hoverT = best.t; showHover(best);
+}
+function showHover(best){
+  const box = $("chart"), rect = box.getBoundingClientRect(), svg = box.querySelector("svg"), W = svg.viewBox.baseVal.width;
   const xh = svg.querySelector("#xhair"), xd = svg.querySelector("#xdot");
   xh.setAttribute("x1",best.x); xh.setAttribute("x2",best.x); xh.setAttribute("visibility","visible");
   xd.setAttribute("cx",best.x); xd.setAttribute("cy",best.y); xd.setAttribute("visibility","visible");
   const tip = $("tip"); tip.hidden = false; tip.textContent = `${fmt$(best.v)} · ${hhmm(best.t)}`;
   tip.style.left = Math.min(rect.width-60, Math.max(60, best.x*rect.width/W))+"px"; tip.style.top = (best.y*rect.height/svg.viewBox.baseVal.height)+"px";
 }
-function unhover(){ $("tip").hidden = true; const svg = $("chart").querySelector("svg"); svg?.querySelector("#xhair")?.setAttribute("visibility","hidden"); svg?.querySelector("#xdot")?.setAttribute("visibility","hidden"); }
+function unhover(){ hoverT = null; $("tip").hidden = true; const svg = $("chart").querySelector("svg"); svg?.querySelector("#xhair")?.setAttribute("visibility","hidden"); svg?.querySelector("#xdot")?.setAttribute("visibility","hidden"); }
 $("chart").addEventListener("pointermove", hover);
 $("chart").addEventListener("pointerleave", unhover);
-let hoverHold = false;
-$("chart").addEventListener("pointerdown", ()=>{ hoverHold = true; });
-$("chart").addEventListener("pointerup", ()=>{ hoverHold = false; setTimeout(unhover, 1500); });
+for(const ev of ["pointerup","pointercancel"]) $("chart").addEventListener(ev, ()=>{ clearTimeout(hoverTimer); hoverTimer = setTimeout(unhover, 1500); });
 addEventListener("resize", ()=>drawChart());
 
 /* ---------- 実行制御 ---------- */
@@ -750,7 +757,7 @@ async function tick(){
   }catch(e){ status("エラー: "+e.message+"（次の確認で再試行します）", true); }
   record();
   busy = false; save();
-  if(!hoverHold) render();
+  render();
   if(running) timer = setTimeout(tick, S.settings.mode==="demo" ? 1000 : S.settings.pollSec*1000);
 }
 async function start(){
