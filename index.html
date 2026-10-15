@@ -86,6 +86,12 @@ textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
 .grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
 .note{font-size:13px; color:var(--muted); background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px}
 .note b{color:var(--fg)}
+.preview{display:flex; flex-direction:column; gap:6px; font-size:13px}
+.preview .row{display:flex; justify-content:space-between; align-items:center; gap:8px}
+.preview .row button{padding:6px 12px}
+.preview ol{margin:0; padding-left:2.2em; max-height:240px; overflow-y:auto}
+.preview li{padding:2px 0; overflow-wrap:anywhere}
+.preview li .num{font-size:11px; color:var(--muted); margin-left:6px}
 .confirm{display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px}
 @media (prefers-reduced-motion:no-preference){.pill.run{animation:pulse 2s ease-in-out infinite}}
 @keyframes pulse{50%{opacity:.55}}
@@ -158,9 +164,13 @@ textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
         <label>手数料（1回 $）<input id="fee" type="number" step="0.01" min="0" inputmode="decimal"></label>
       </div>
       <label>フォロー候補（上から順位順）
-        <textarea id="traders" spellcheck="false" placeholder="名前 ウォレットアドレス"></textarea>
-        <span class="hint">1行に「名前 アドレス」。週間ランキングの上位から順に貼り付けてください。上の人から順に雇い、連敗したら次の人に交代します。</span>
+        <textarea id="traders" spellcheck="false" placeholder="ランキングのページをコピーして、ここにそのまま貼り付け"></textarea>
+        <span class="hint">Solana Tracker や Kolscan のランキングを、ページごとコピーして貼り付けるだけでOKです。ウォレットアドレスと名前を自動で拾い、上から順位順に並べます。プロフィールのURLを並べて貼っても読み取れます。</span>
       </label>
+      <div class="preview">
+        <div class="row"><span id="previewCount" class="muted">まだ読み取っていません</span><button id="btnClear" class="ghost" type="button">クリア</button></div>
+        <ol id="previewList"></ol>
+      </div>
       <label>Solana RPC URL
         <input id="rpc" type="text" inputmode="url" autocomplete="off" spellcheck="false">
         <span class="hint">公開RPCは混むと失敗します。安定させたい場合はHeliusなどの無料RPCのURLを入れてください。</span>
@@ -200,14 +210,14 @@ const defaults = () => ({
   run:null,
 });
 function freshRun(s){
-  return {cash:+s.startCash, startCash:+s.startCash, idx:-1, fired:[], streak:0, lastSig:null,
+  return {cash:+s.startCash, startCash:+s.startCash, cur:null, ended:false, fired:[], streak:0, lastSig:null,
     positions:{}, trades:[], timeline:[], hiredTrades:0, demo:{}, startedAt:Date.now()};
 }
 
 let S;
 try{ S = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY)||"{}")); }catch(e){ S = defaults(); }
 S.settings = Object.assign(defaults().settings, S.settings);
-if(!S.run) S.run = freshRun(S.settings);
+if(!S.run || !("cur" in S.run)) S.run = freshRun(S.settings);
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
 
 let running = false, timer = null, busy = false, wakeLock = null;
@@ -215,17 +225,41 @@ let solUsd = null, solUsdAt = 0, marksAt = 0;
 const $ = id => document.getElementById(id);
 
 /* ---------- 候補リスト ---------- */
-function traderList(){
-  if(S.settings.mode === "demo") return DEMO_TRADERS;
-  return S.settings.traders.split("\n").map(l=>l.trim()).filter(Boolean).map((l,i)=>{
-    const parts = l.split(/[\s,]+/);
-    const addr = parts.find(p=>/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p));
-    if(!addr) return null;
-    const name = parts.filter(p=>p!==addr).join(" ") || addr.slice(0,4)+"…"+addr.slice(-4);
-    return {name, addr};
-  }).filter(Boolean);
+// 貼り付けた文字からウォレットアドレスを出てきた順に拾い、近くの文字を名前にする
+const ADDR_RE = /(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])/g;
+const NOT_WALLET = new Set([SOL, ...USD_MINTS]);
+function cleanName(s){
+  return s.replace(/https?:\/\/\S+/g," ").replace(ADDR_RE," ")
+    .replace(/^\s*(#|No\.?)?\s*\d+\s*[.)、:]?\s+/,"")       // 先頭の順位番号
+    .replace(/[-+]?\$?\s?[\d,.]+\s?[KMBkmb%]?(\s|$)/g," ")   // 金額・％・数字
+    .replace(/[|│\t]+/g," ").replace(/\s+/g," ").trim();
 }
-function current(){ const l = traderList(); return S.run.idx>=0 ? l[S.run.idx] : null; }
+function guessName(lines, i){
+  const own = cleanName(lines[i]);
+  if(own && own.length <= 30) return own;
+  for(let j=i-1; j>=Math.max(0,i-3); j--){
+    if(new RegExp(ADDR_RE.source).test(lines[j])) break;     // 前の人の行まで戻らない
+    if(/[$%＄]|^\s*[+-]\d|\bsol\b/i.test(lines[j])) continue;   // 損益などの数字の行は名前にしない
+    const n = cleanName(lines[j]);
+    if(n && n.length <= 30 && !/^(PnL|ROI|Win|勝率|利益|Rank|順位)/i.test(n)) return n;
+  }
+  return "";
+}
+function parseCandidates(text){
+  const lines = String(text||"").split(/\r?\n/), out = [], seen = new Set();
+  lines.forEach((line,i)=>{
+    const found = line.match(ADDR_RE)||[];
+    for(const a of found){
+      if(seen.has(a) || NOT_WALLET.has(a) || /(pump|bonk)$/.test(a)) continue;   // トークンのアドレスは除外
+      seen.add(a);
+      out.push({addr:a, name: (found.length===1 && guessName(lines,i)) || shortMint(a)});
+    }
+  });
+  return out;
+}
+function traderList(){ return S.settings.mode === "demo" ? DEMO_TRADERS : parseCandidates(S.settings.traders); }
+function current(){ return S.run.cur; }
+function rankOf(addr){ const i = traderList().findIndex(t=>t.addr===addr); return i<0 ? null : i+1; }
 
 /* ---------- 表示 ---------- */
 const fmt$ = v => (v<0?"-$":"$")+Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -249,11 +283,12 @@ function render(){
   const pill = $("pill");
   pill.textContent = running ? (S.settings.mode==="demo"?"デモ稼働中":"稼働中") : "停止中";
   pill.className = "pill" + (running ? (S.settings.mode==="demo"?" demo":" run") : "");
-  $("btnRun").textContent = running ? "停止" : (r.idx<0 ? "開始" : "再開");
+  $("btnRun").textContent = running ? "停止" : (r.cur ? "再開" : "開始");
 
   const c = current();
   $("tName").textContent = c ? c.name : "未選択";
-  $("tRank").textContent = c ? `ランキング #${r.idx+1}` : "";
+  const rank = c && rankOf(c.addr);
+  $("tRank").textContent = c ? (rank ? `ランキング #${rank}` : "リスト外") : "";
   $("tAddr").textContent = c && S.settings.mode==="live" ? c.addr : "";
   const dots = $("tDots"); dots.replaceChildren();
   for(let i=0;i<S.settings.lossLimit;i++){ dots.append(el("span","dot"+(i<r.streak?" on":""))); }
@@ -342,20 +377,22 @@ function pushTrade(t){ S.run.trades.push(t); if(S.run.trades.length>500) S.run.t
 function fire(){
   const r = S.run, c = current();
   for(const p of Object.values(r.positions)) sellPart(p, 1, p.last||p.avg, "close");
-  r.fired.push(r.idx);
-  log("fire", `${c.name}（#${r.idx+1}）を${r.streak}連敗で解雇`);
+  r.fired.push(c.addr);
+  const rank = rankOf(c.addr);
+  log("fire", `${c.name}${rank?`（#${rank}）`:""}を${r.streak}連敗で解雇`);
   hireNext();
 }
+// 解雇していない候補のうち、いちばん順位が上の人を雇う（リストを貼り替えても新しい順位で選ぶ）
 function hireNext(){
   const r = S.run, list = traderList();
-  let i = r.idx + 1;
-  while(i < list.length && r.fired.includes(i)) i++;
+  const i = list.findIndex(t => !r.fired.includes(t.addr));
   r.streak = 0; r.hiredTrades = 0; r.lastSig = null;
-  if(i >= list.length){
-    r.idx = list.length; log("stop", "候補がいなくなったので停止しました。候補リストを追加してください。");
+  if(i < 0){
+    r.cur = null; r.ended = true;
+    log("stop", "候補がいなくなったので停止しました。設定でランキングを貼り直してください。");
     stop(); return false;
   }
-  r.idx = i;
+  r.cur = list[i]; r.ended = false;
   log("hire", `${list[i].name}（#${i+1}）を雇用`);
   return true;
 }
@@ -495,9 +532,11 @@ async function tick(){
 async function start(){
   const list = traderList();
   if(!list.length){ status("設定タブでフォロー候補を1人以上入れてください。", true); showTab("settings"); return; }
-  if(S.run.idx >= list.length){ status("候補がいません。候補リストを追加するか、リセットしてください。", true); return; }
+  if(!S.run.cur){
+    if(list.every(t => S.run.fired.includes(t.addr))){ status("リストの全員を解雇済みです。新しいランキングを貼り直すか、リセットしてください。", true); return; }
+    hireNext();
+  }
   running = true;
-  if(S.run.idx < 0) hireNext();
   try{ wakeLock = await navigator.wakeLock?.request("screen"); }catch(e){}
   save(); render(); tick();
 }
@@ -535,13 +574,31 @@ $("settingsForm").onsubmit = e => {
   n.lossLimit = Math.max(1, Math.round(n.lossLimit)); n.pollSec = Math.max(3, n.pollSec);
   const modeChanged = n.mode !== before, cashChanged = n.startCash !== S.settings.startCash;
   Object.assign(S.settings, n);
-  if(modeChanged || (cashChanged && S.run.idx < 0)){ stop(); S.run = freshRun(S.settings); }
+  if(modeChanged || (cashChanged && !S.run.cur && !S.run.timeline.length)){ stop(); S.run = freshRun(S.settings); }
   save(); render();
-  const bad = S.settings.mode==="live" ? S.settings.traders.split("\n").filter(l=>l.trim()).length - traderList().length : 0;
-  $("savedMsg").textContent = "保存しました" + (modeChanged?"。モードを切り替えたので履歴を初期化しました":"") + (bad>0?`。アドレスを読み取れない行が${bad}行あります`:"");
+  const n2 = parseCandidates(S.settings.traders).length;
+  $("savedMsg").textContent = "保存しました" + (modeChanged?"。モードを切り替えたので履歴を初期化しました":"")
+    + (S.settings.mode==="live" ? `。フォロー候補は${n2}人です` : "");
 };
 
+function updatePreview(){
+  const list = parseCandidates($("traders").value), ol = $("previewList");
+  ol.replaceChildren();
+  $("previewCount").textContent = $("traders").value.trim()
+    ? (list.length ? `${list.length}人を読み取りました（この順で雇います）` : "ウォレットアドレスが見つかりません")
+    : "まだ読み取っていません";
+  for(const t of list.slice(0,50)){
+    const li = el("li", null, t.name);
+    if(S.run.fired.includes(t.addr)) li.className = "muted", li.append(" （解雇済み）");
+    li.append(el("span","num",shortMint(t.addr)));
+    ol.append(li);
+  }
+}
+$("traders").addEventListener("input", updatePreview);
+$("btnClear").onclick = () => { $("traders").value = ""; updatePreview(); $("traders").focus(); };
+
 fillForm();
+updatePreview();
 try{ const t = localStorage.getItem(KEY+".tab"); if(t) showTab(t); }catch(e){}
 render();
 </script>
