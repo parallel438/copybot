@@ -466,10 +466,14 @@ async function rpc(method, params){
         body:JSON.stringify({jsonrpc:"2.0", id:1, method, params})});
       if(!res.ok) throw new Error(String(res.status));
       const j = await res.json();
-      if(j.error) throw new Error(j.error.message);
+      if(j.error){
+        // 取引の形式が新しいなどの「つながったうえでの返事」は、別のRPCに替えても同じなのでそのまま返す
+        if(/maxSupportedTransactionVersion/.test(j.error.message)){ rpcAt = i; throw Object.assign(new Error(j.error.message), {final:true}); }
+        throw new Error(j.error.message);
+      }
       rpcAt = i;
       return j.result;
-    }catch(e){ errs.push(`${new URL(list[i]).host}: ${e.message}`); }
+    }catch(e){ if(e.final) throw e; errs.push(`${new URL(list[i]).host}: ${e.message}`); }
   }
   throw new Error("どのRPCにもつながりませんでした（" + errs.join(" / ") + "）");
 }
@@ -525,7 +529,17 @@ function parseSwap(tx, wallet, solPrice){
   }
   return null;
 }
-const symCache = {};
+const symCache = {}, txFails = {};
+// Solanaの取引には形式のバージョンがある。RPCに「この版まで読める」と伝え、新しい版を求められたら合わせて取り直す
+let txVer = 1;
+async function getTx(sig){
+  try{ return await rpc("getTransaction",[sig,{encoding:"jsonParsed",maxSupportedTransactionVersion:txVer,commitment:"confirmed"}]); }
+  catch(e){
+    const m = /maxSupportedTransactionVersion\W+(\d+)/.exec(e.message);
+    if(m && +m[1] !== txVer){ txVer = +m[1]; return getTx(sig); }
+    throw e;
+  }
+}
 async function pollSlot(i, solPrice){
   const s = S.run.slots[i];
   if(!s.lastSig){
@@ -538,7 +552,14 @@ async function pollSlot(i, solPrice){
   for(const sg of sigs.reverse()){
     if(S.run.slots[i] !== s) break;
     if(!sg.err){
-      const tx = await rpc("getTransaction",[sg.signature,{encoding:"jsonParsed",maxSupportedTransactionVersion:0,commitment:"confirmed"}]);
+      let tx = null;
+      try{ tx = await getTx(sg.signature); delete txFails[sg.signature]; }
+      catch(e){
+        // 同じ取引で3回続けて失敗したら、その1件だけ飛ばして先に進む（ずっと止まらないように）
+        txFails[sg.signature] = (txFails[sg.signature]||0) + 1;
+        if(txFails[sg.signature] < 3) throw e;
+        log("SKIP", `${s.name} の取引を1件読めなかったので飛ばしました`);
+      }
       const ev = parseSwap(tx, s.addr, solPrice);
       if(ev){
         if(!symCache[ev.mint]){ try{ const m = await dexPrices([ev.mint]); symCache[ev.mint] = m[ev.mint]?.sym || shortMint(ev.mint); }catch(e){ symCache[ev.mint] = shortMint(ev.mint); } }
