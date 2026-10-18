@@ -102,6 +102,9 @@ button.danger{color:var(--loss)}
 button.ghost{background:transparent}
 .status{font-size:12px; color:var(--muted); min-height:1.5em; overflow-wrap:anywhere}
 .status.err{color:var(--loss)}
+.auto{display:flex; flex-direction:column; gap:6px}
+.auto .bar{height:4px; border-radius:2px; background:var(--line); overflow:hidden}
+.auto .bar i{display:block; height:100%; background:var(--accent)}
 .bt{display:flex; flex-direction:column; gap:6px}
 .bt-row{display:flex; gap:8px; flex-wrap:wrap}
 .bt-row select{flex:1; min-width:120px; padding:10px 8px; font-size:14px}
@@ -263,6 +266,18 @@ textarea{font-family:var(--font-num); font-size:13px; min-height:150px}
         <textarea id="traders" spellcheck="false" placeholder="ランキングのページをコピーして、ここにそのまま貼り付け"></textarea>
         <span class="hint">Solana Tracker や Kolscan のランキングを、ページごとコピーして貼り付けるだけでOKです。ウォレットアドレスと名前（あれば成績も）を自動で拾い、上から順位順に並べます。上位から「同時にフォローする人数」ぶん雇い、誰かが連敗で解雇されたら、次の順位の人が入ります。</span>
       </label>
+      <div class="auto">
+        <div class="bt-row">
+          <select id="autoN" aria-label="調べる量">
+            <option value="100">少なめ（速い）</option>
+            <option value="200" selected>ふつう</option>
+            <option value="400">多め（遅い）</option>
+          </select>
+          <button id="btnAuto" type="button">候補を自動で集める</button>
+        </div>
+        <span class="hint">いま値上がりしているトークンを、安いうちに買っていたウォレットをブロックチェーンから探し、複数の銘柄で当てている人ほど上に並べます。集めた候補は上の欄の先頭に入ります（手で貼った候補はその下に残ります）。</span>
+        <div id="autoProg" class="bar" hidden><i id="autoBar" style="width:0%"></i></div>
+      </div>
       <div class="preview">
         <div class="row"><span id="previewCount" class="muted">まだ読み取っていません</span><button id="btnClear" class="ghost" type="button">クリア</button></div>
         <ol id="previewList"></ol>
@@ -332,7 +347,7 @@ const MONEY_RE = /[+-]?\s?\$\s?[\d,.]+\s?[kKmMbB]?|[+-][\d,.]+\s?[kKmM]?\s?SOL/i
 function cleanName(s){
   return s.replace(/https?:\/\/\S+/g," ").replace(ADDR_RE," ")
     .replace(/^\s*(#|No\.?)?\s*\d+\s*[.)、:]?\s+/,"")
-    .replace(/[-+]?\$?\s?[\d,.]+\s?[KMBkmb%]?(\s|$)/g," ")
+    .replace(/(^|\s)[-+]?\$?\s?[\d,.]+\s?[KMBkmb%]?(?=\s|$)/g," ")   // 単独の数字・金額だけ消す（名前の末尾の数字は残す）
     .replace(/[|│\t]+/g," ").replace(/\s+/g," ").trim();
 }
 function guessName(lines, i){
@@ -620,6 +635,83 @@ async function liveTick(){
   if(errs.length) status(`エラー: ${errs[0]}（${errs.length}人ぶん。次の確認で再試行します）`, true);
   else status(`${ok}人を同期 · ${secs}秒 · ${new Date().toLocaleTimeString("ja-JP")}（RPC: ${rpcHost()}）`);
   if(!S.run.lastSyncLog || Date.now()-S.run.lastSyncLog > 300000){ S.run.lastSyncLog = Date.now(); log("SYNC", `${ok}人を同期 · ${secs}秒`); }
+}
+
+/* ---------- 候補の自動収集 ---------- */
+// 1) DexScreener で値上がり中のSolanaトークンを探す
+// 2) それぞれの取引ペアの直近の取引を読み、そのトークンを買った人（署名した本人）と買値を拾う
+// 3) 今の価格÷買値（何倍になったか）で、複数の銘柄で安く買えていた人ほど上位にする
+let discovering = false;
+async function jsonGet(url){ const r = await fetch(url); if(!r.ok) throw new Error(`${new URL(url).host} ${r.status}`); return r.json(); }
+async function trendingTokens(){
+  const urls = ["https://api.dexscreener.com/token-boosts/top/v1", "https://api.dexscreener.com/token-boosts/latest/v1", "https://api.dexscreener.com/token-profiles/latest/v1"];
+  const mints = new Set();
+  for(const u of urls){
+    try{ for(const t of await jsonGet(u)) if(t.chainId==="solana" && t.tokenAddress) mints.add(t.tokenAddress); }catch(e){}
+  }
+  const list = [...mints], best = {};
+  for(let i=0;i<list.length;i+=30){
+    let arr = [];
+    try{ arr = await jsonGet(`https://api.dexscreener.com/tokens/v1/solana/${list.slice(i,i+30).join(",")}`); }catch(e){ continue; }
+    for(const pr of Array.isArray(arr)?arr:[]){
+      const m = pr.baseToken?.address; if(!m || pr.chainId!=="solana") continue;
+      if(!best[m] || (pr.liquidity?.usd||0) > (best[m].liquidity?.usd||0)) best[m] = pr;
+    }
+  }
+  return Object.values(best).filter(pr=>{
+    const liq = pr.liquidity?.usd||0, h1 = pr.priceChange?.h1||0, h6 = pr.priceChange?.h6||0, tx = (pr.txns?.h1?.buys||0)+(pr.txns?.h1?.sells||0);
+    return liq >= 10000 && (h1 >= 30 || h6 >= 80) && tx >= 20;
+  }).sort((a,b)=>(b.priceChange?.h6||0)-(a.priceChange?.h6||0)).slice(0,10);
+}
+async function discover(perToken){
+  if(discovering) return;
+  discovering = true; $("btnAuto").disabled = true; $("autoProg").hidden = false; $("autoBar").style.width = "0%";
+  const msg = (t, err) => { $("savedMsg").textContent = t; $("savedMsg").className = "status"+(err?" err":""); status(t, err); };
+  try{
+    msg("値上がり中のトークンを探しています…");
+    const toks = await trendingTokens();
+    if(!toks.length) throw new Error("条件に合う値上がり中のトークンが見つかりませんでした。時間をおいて試してください");
+    const solPrice = await getSolUsd(), wallets = {};
+    let nFail = 0;
+    for(const [ti,pr] of toks.entries()){
+      const mint = pr.baseToken.address, sym = pr.baseToken.symbol, now = +pr.priceUsd;
+      let sigs = [];
+      try{ sigs = await rpc("getSignaturesForAddress",[pr.pairAddress,{limit:perToken}]); }catch(e){ nFail++; continue; }
+      for(const [k,sg] of sigs.entries()){
+        if(k % 5 === 0){
+          msg(`${ti+1}/${toks.length}銘柄目 ${sym}（6時間で${pr.priceChange?.h6>0?"+":""}${Math.round(pr.priceChange?.h6||0)}%）の取引を調べています… ${k+1}/${sigs.length}件・見つけた人 ${Object.keys(wallets).length}人`);
+          $("autoBar").style.width = (((ti + k/Math.max(1,sigs.length))/toks.length)*100).toFixed(1)+"%";
+        }
+        if(sg.err) continue;
+        let tx; try{ tx = await getTx(sg.signature); }catch(e){ nFail++; continue; }
+        if(!tx) continue;
+        const signers = tx.transaction.message.accountKeys.filter(a=>a.signer).map(a=>a.pubkey);
+        for(const w of signers){
+          const ev = parseSwap(tx, w, solPrice);
+          if(!ev || ev.type!=="buy" || ev.mint!==mint || ev.usd < 20 || !(ev.price > 0)) continue;
+          const mult = Math.min(1000, now/ev.price);
+          const rec = wallets[w] || (wallets[w] = {addr:w, hits:{}});
+          const h = rec.hits[mint];
+          if(!h || mult > h.mult) rec.hits[mint] = {sym, mult, usd:ev.usd};
+        }
+        await sleep(40);
+      }
+    }
+    // 2倍以上で買えていた銘柄の数 → 倍率の対数の合計 の順に並べる
+    const ranked = Object.values(wallets).map(w=>{
+      const hs = Object.values(w.hits), wins = hs.filter(h=>h.mult>=2);
+      return {addr:w.addr, wins:wins.length, score:wins.reduce((a,h)=>a+Math.log2(h.mult),0), gain:hs.reduce((a,h)=>a+h.usd*(h.mult-1),0), syms:wins.map(h=>h.sym)};
+    }).filter(w=>w.wins>0).sort((a,b)=> b.wins-a.wins || b.score-a.score).slice(0,40);
+    if(!ranked.length) throw new Error(`安く買えていた人が見つかりませんでした（読めなかった取引 ${nFail}件）。「多め」で試すか、HeliusのURLを設定してください`);
+    const lines = ranked.map(w => `自動-${w.syms.slice(0,2).join("+")}${w.syms.length>2?"ほか":""} ${w.addr} +$${Math.round(w.gain)}`);
+    const old = S.settings.traders.split("\n").filter(l=>!/^自動-/.test(l.trim())).join("\n").trim();
+    S.settings.traders = lines.join("\n") + (old ? "\n" + old : "");
+    $("traders").value = S.settings.traders;
+    if(S.settings.mode !== "live"){ S.settings.mode = "live"; $("mode").value = "live"; stop(); S.run = freshRun(S.settings); }
+    save(); updatePreview(); render();
+    msg(`${toks.length}銘柄から ${ranked.length}人を候補に入れました（2銘柄以上で当てた人 ${ranked.filter(w=>w.wins>=2).length}人・読めなかった取引 ${nFail}件）。「過去データで検証」で、コピー向きか確かめてください。`);
+  }catch(e){ msg("自動収集できませんでした: "+e.message, true); }
+  discovering = false; $("btnAuto").disabled = false; $("autoProg").hidden = true;
 }
 
 /* ---------- 過去データ検証 ---------- */
@@ -965,6 +1057,7 @@ function updatePreview(){
 }
 $("traders").addEventListener("input", updatePreview);
 $("slots").addEventListener("input", updatePreview);
+$("btnAuto").onclick = () => discover(+$("autoN").value);
 $("btnClear").onclick = () => { $("traders").value = ""; updatePreview(); $("traders").focus(); };
 
 fillForm();
