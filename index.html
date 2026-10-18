@@ -633,7 +633,7 @@ async function backtest(hours, maxTx){
   S.run = freshRun(S.settings); S.run.bt = {hours, at:Date.now()};
   backtesting = true; btAbort = false; $("btProg").hidden = false; $("btBar").style.width = "0%";
   render();
-  const events = [];
+  const events = []; let nRead = 0, nFail = 0;
   try{
     const solPrice = await getSolUsd();
     for(const [ci,c] of cands.entries()){
@@ -650,12 +650,12 @@ async function backtest(hours, maxTx){
       for(const [k,sg] of sigs.entries()){
         if(btAbort) break;
         if(k % 5 === 0){
-          status(`取引を読み込み中… ${ci+1}/${cands.length}人目 ${c.name}：${k+1}/${sigs.length}件（見つかった売買 ${events.length}件）`);
+          status(`取引を読み込み中… ${ci+1}/${cands.length}人目 ${c.name}：${k+1}/${sigs.length}件（見つかった売買 ${events.length}件・読めなかった取引 ${nFail}件）`);
           $("btBar").style.width = (((ci + k/Math.max(1,sigs.length)) / cands.length)*100).toFixed(1)+"%";
         }
         if(sg.err) continue;
         let tx = null;
-        try{ tx = await getTx(sg.signature); }catch(e){ continue; }
+        try{ tx = await getTx(sg.signature); nRead++; }catch(e){ nFail++; continue; }
         const ev = parseSwap(tx, c.addr, solPrice);
         if(ev){ ev.addr = c.addr; events.push(ev); }
         await sleep(40);
@@ -683,8 +683,11 @@ async function backtest(hours, maxTx){
     for(const p of Object.values(S.run.positions)) if(marks[p.mint]?.price) p.last = marks[p.mint].price;
     record();
     const sells = S.run.trades.filter(t=>t.side!=="buy").length;
-    log("INFO", `検証${btAbort?"を途中で中止":"が完了"}：過去${hours}時間・${cands.length}人ぶんの売買${events.length}件から、${S.run.copies}回コピー・${sells}回決済を再現`);
-    status(`検証${btAbort?"を中止しました（読み込めた分で再現）":"が完了しました"}。売買${events.length}件 → コピー${S.run.copies}回・決済${sells}回`);
+    const failPct = nFail / Math.max(1, nRead + nFail) * 100;
+    log("INFO", `検証${btAbort?"を途中で中止":"が完了"}：過去${hours}時間・${cands.length}人ぶんの売買${events.length}件から、${S.run.copies}回コピー・${sells}回決済を再現（読めなかった取引 ${nFail}件・${failPct.toFixed(0)}%）`);
+    // 取引を読み損ねると「売ったのに持ち続けた」扱いになり、結果が実際より悪く出る
+    if(failPct >= 5) status(`検証は終わりましたが、取引の${failPct.toFixed(0)}%（${nFail}件）を読めませんでした。売りを読み損ねると結果が実際より悪く出るので、この結果は当てになりません。HeliusのURLを設定してからやり直してください。`, true);
+    else status(`検証${btAbort?"を中止しました（読み込めた分で再現）":"が完了しました"}。売買${events.length}件 → コピー${S.run.copies}回・決済${sells}回（読めなかった取引 ${nFail}件）`);
   }catch(e){
     simNow = null;
     status("検証できませんでした: "+e.message, true);
